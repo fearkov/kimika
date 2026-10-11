@@ -47,7 +47,14 @@ fn data_processing_and_misc<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Opti
             0b10010 | 0b10110 => {
                 let value = arm_expand_immediate(op & 0xFFF, cpu.cpsr.c).0;
                 let mask = bits(op, 16, 19);
+                // bits 15:12 are meant to be ones, and a hint's 11:8 zeros
+                if bits(op, 12, 15) != 0xF {
+                    return cpu.undefined(op);
+                }
                 if op1 == 0b10010 && mask == 0 {
+                    if bits(op, 8, 11) != 0 {
+                        return cpu.undefined(op);
+                    }
                     misc::hint(op & 0xFF)
                 } else {
                     misc::write_status(cpu, op, value, mask, bit(op, 22))
@@ -93,6 +100,16 @@ fn data_processing(cpu: &mut Cpu, op: u32, operand: u32, carry: bool) -> Option<
     if set_flags && d == PC && !operation.is_compare() {
         return cpu.undefined(op);
     }
+    // the compares have no destination and MOV and MVN no first operand,
+    // and those fields are meant to be zero
+    let unused = match operation {
+        Operation::Tst | Operation::Teq | Operation::Cmp | Operation::Cmn => d,
+        Operation::Mov | Operation::Mvn => n,
+        _ => 0,
+    };
+    if unused != 0 {
+        return cpu.undefined(op);
+    }
     // ADR is ADD and SUB with the PC, whose base is word aligned
     let a = if n == PC { cpu.aligned_pc() } else { cpu.regs[n] };
     alu::data_processing(cpu, operation, set_flags, d, a, operand, carry);
@@ -117,6 +134,12 @@ fn multiply(cpu: &mut Cpu, op: u32, op1: u32) -> Option<Exit> {
     let m = bits(op, 8, 11) as usize;
     let n = (op & 0xF) as usize;
     let set_flags = bit(op, 20);
+    // none of them takes the PC, and MUL has no accumulator, its field meant
+    // to be zero
+    let plain = op1 >> 1 == 0;
+    if [d, m, n].contains(&PC) || (plain && a != 0) || (!plain && a == PC) {
+        return cpu.undefined(op);
+    }
     match op1 >> 1 {
         0b000 => multiply::multiply(cpu, d, n, m, None, set_flags),
         0b001 => multiply::multiply(cpu, d, n, m, Some(a), set_flags),
@@ -139,7 +162,14 @@ fn halfword_multiply(cpu: &mut Cpu, op: u32) -> Option<Exit> {
     let m = bits(op, 8, 11) as usize;
     let n = (op & 0xF) as usize;
     let (top_n, top_m) = (bit(op, 5), bit(op, 6));
-    match bits(op, 21, 22) {
+    // SMUL<x><y> and SMULW<y> have no accumulator, its field meant to be
+    // zero, and SMLAL<x><y> needs two registers for its result
+    let kind = bits(op, 21, 22);
+    let plain = kind == 0b11 || (kind == 0b01 && top_n);
+    if [d, m, n].contains(&PC) || (plain && a != 0) || (!plain && a == PC) || (kind == 0b10 && a == d) {
+        return cpu.undefined(op);
+    }
+    match kind {
         0b00 => multiply::halfword(cpu, d, n, m, Some(a), top_n, top_m),
         // SMLAW<y> with bit 5 clear, SMULW<y> with it set
         0b01 if top_n => multiply::word_by_halfword(cpu, d, n, m, None, top_m),
@@ -156,25 +186,30 @@ fn miscellaneous(cpu: &mut Cpu, op: u32) -> Option<Exit> {
     let d = bits(op, 12, 15) as usize;
     let m = (op & 0xF) as usize;
     let n = bits(op, 16, 19) as usize;
+    // the fields each of these has no use for are meant to be ones or zeros
+    let (ones, zeros) = (|lo: u32| bits(op, lo, lo + 3) == 0xF, |lo: u32| bits(op, lo, lo + 3) == 0);
     match (bits(op, 4, 6), bits(op, 21, 22)) {
-        (0b000, 0b00 | 0b10) => misc::read_status(cpu, op, d, bit(op, 22)),
-        (0b000, _) => misc::write_status(cpu, op, cpu.regs[m], bits(op, 16, 19), bit(op, 22)),
-        (0b001, 0b01) | (0b010, 0b01) | (0b011, 0b01) => misc::branch_exchange(cpu, op),
-        (0b001, 0b11) => {
+        (0b000, 0b00 | 0b10) if ones(16) && zeros(8) && zeros(0) => misc::read_status(cpu, op, d, bit(op, 22)),
+        (0b000, 0b01 | 0b11) if ones(12) && zeros(8) && m != PC => {
+            misc::write_status(cpu, op, cpu.regs[m], bits(op, 16, 19), bit(op, 22))
+        }
+        (0b001, 0b01) | (0b010, 0b01) | (0b011, 0b01) if bits(op, 8, 19) == 0xFFF => misc::branch_exchange(cpu, op),
+        (0b001, 0b11) if ones(16) && ones(8) => {
             if d == PC || m == PC {
                 return cpu.undefined(op);
             }
             cpu.regs[d] = cpu.regs[m].leading_zeros();
             None
         }
-        (0b101, kind) => {
+        (0b101, kind) if zeros(8) => {
             if [d, n, m].contains(&PC) {
                 return cpu.undefined(op);
             }
             multiply::saturating(cpu, d, m, n, kind & 1 != 0, kind & 2 != 0);
             None
         }
-        (0b111, 0b01) => misc::breakpoint(cpu, bits(op, 8, 19) << 4 | (op & 0xF)),
+        // BKPT has no condition
+        (0b111, 0b01) if op >> 28 == 0xE => misc::breakpoint(cpu, bits(op, 8, 19) << 4 | (op & 0xF)),
         _ => cpu.undefined(op),
     }
 }

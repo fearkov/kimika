@@ -1,2 +1,4 @@
 /target
 *.log
+# what a crashing qemu-arm leaves behind
+*.core

@@ -7,7 +7,7 @@ use super::alu::{signed_saturate, unsigned_saturate};
 use super::multiply;
 use super::shifter::ShiftType;
 use crate::bits::{bit, bits};
-use crate::{Cpu, Exit};
+use crate::{Cpu, Exit, PC};
 
 /// which lanes a parallel instruction works on and how.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,6 +246,10 @@ pub fn execute(cpu: &mut Cpu, op: u32) -> Option<Exit> {
                 0b111 => Lanes::Sub8,
                 _ => return cpu.undefined(op),
             };
+            // bits 11:8 are meant to be ones
+            if bits(op, 8, 11) != 0xF || [d, n, m].contains(&PC) {
+                return cpu.undefined(op);
+            }
             parallel(cpu, d, n, m, lanes, signed, flavor);
         }
         0b01 => return pack_saturate_extend(cpu, op, op1, op2),
@@ -257,16 +261,23 @@ pub fn execute(cpu: &mut Cpu, op: u32) -> Option<Exit> {
                 (0b11000, 0b000) => {
                     // USAD8 and USADA8 put Rd at 19:16 and Ra at 15:12
                     let a = (d != 15).then_some(d);
-                    sum_of_differences(cpu, n, m, bits(op, 8, 11) as usize, a);
+                    let rm = bits(op, 8, 11) as usize;
+                    if [n, m, rm].contains(&PC) {
+                        return cpu.undefined(op);
+                    }
+                    sum_of_differences(cpu, n, m, rm, a);
                 }
                 (0b11010 | 0b11011, 0b010 | 0b110) | (0b11110 | 0b11111, 0b010 | 0b110) => {
                     let width = msb + 1;
-                    if lsb + width > 32 {
+                    if lsb + width > 32 || d == PC || m == PC {
                         return cpu.undefined(op);
                     }
                     extract(cpu, d, m, lsb, width, op1 >> 2 == 0b110);
                 }
                 (0b11100 | 0b11101, 0b000 | 0b100) => {
+                    if d == PC {
+                        return cpu.undefined(op);
+                    }
                     let source = (m != 15).then_some(m);
                     if insert(cpu, d, source, lsb, msb).is_none() {
                         return cpu.undefined(op);
@@ -285,6 +296,20 @@ fn pack_saturate_extend(cpu: &mut Cpu, op: u32, op1: u32, op2: u32) -> Option<Ex
     let m = (op & 0xF) as usize;
     let rotation = bits(op, 10, 11) * 8;
     let accumulate = (n != 15).then_some(n);
+    // what each form has no use for is meant to be ones, or the extends'
+    // bits 9:8 zeros, and none of them takes the PC
+    let ones = |lo: u32| bits(op, lo, lo + 3) == 0xF;
+    let fits = match (op1, op2) {
+        (0b01000, 0b000 | 0b010 | 0b100 | 0b110) => ![d, n, m].contains(&PC),
+        (_, 0b011) => bits(op, 8, 9) == 0 && d != PC && m != PC,
+        (0b01000, 0b101) => ones(8) && ![d, n, m].contains(&PC),
+        (0b01010 | 0b01110, 0b001) => ones(8) && d != PC && m != PC,
+        (0b01011 | 0b01111, 0b001 | 0b101) => ones(16) && ones(8) && d != PC && m != PC,
+        _ => d != PC && m != PC,
+    };
+    if !fits {
+        return cpu.undefined(op);
+    }
     match (op1, op2) {
         (0b01000, 0b000 | 0b010 | 0b100 | 0b110) => pack(cpu, d, n, m, bit(op, 6), bits(op, 7, 11)),
         (0b01000, 0b011) => extend(cpu, d, accumulate, m, rotation, Extension::SignedBytes16),
@@ -321,6 +346,13 @@ fn signed_multiply(cpu: &mut Cpu, op: u32, op1: u32, op2: u32) -> Option<Exit> {
     let accumulate = (a != 15).then_some(a);
     let swap = bit(op, 5);
     let subtract = bit(op, 6);
+    // SMMLS has no form without Ra, and SMLALD and SMLSLD take two
+    // registers for their result
+    let long = op1 == 0b10100;
+    let needs_a = long || (op1, op2 & 0b110) == (0b10101, 0b110);
+    if [d, m, n].contains(&PC) || (needs_a && a == PC) || (long && a == d) {
+        return cpu.undefined(op);
+    }
     match (op1, op2 & 0b110) {
         (0b10000, 0b000 | 0b010) => multiply::dual(cpu, d, n, m, accumulate, swap, subtract),
         (0b10100, 0b000 | 0b010) => multiply::dual_long(cpu, a, d, n, m, swap, subtract),

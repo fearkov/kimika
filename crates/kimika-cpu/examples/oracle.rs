@@ -41,6 +41,7 @@ const HEADER: u32 = 64;
 
 const RAN: u32 = 1;
 const SIGILL: u32 = 0x104;
+const SIGTRAP: u32 = 0x105;
 /// NZCVQ and GE.
 const APSR_MASK: u32 = 0xF80F_0000;
 /// all but the cumulative exception flags, IOC to IXC and IDC.
@@ -114,6 +115,8 @@ fn interesting(rng: &mut Rng) -> u32 {
 
 struct Case {
     opcode: u32,
+    /// an IT that makes a Thumb instruction conditional, before it.
+    it: Option<u32>,
     /// assembly to run in place of the opcode.
     source: Option<String>,
     state: [u32; STATE_WORDS],
@@ -163,9 +166,290 @@ fn generate(class: &str, index: usize, rng: &mut Rng, pattern: (u32, u32)) -> Ca
             op & !(pattern.0 & !0x000F_000F) | (pattern.1 & !0x000F_000F)
         }
         "vfp" => (0xEE00_0A00 | (rng.word() & 0x00FF_F1EF)) & !pattern.0 | pattern.1,
+        "arm" => arm_integer(rng) & !pattern.0 | pattern.1,
+        "thumb" => thumb_integer(rng),
         _ => panic!("no class {class}: neon, neon-memory and vfp, each with -thumb or not"),
     };
-    Case { opcode, source: None, state, buffer }
+    // a third of the Thumb instructions in an IT block of their own
+    let it = (class == "thumb" && rng.below(3) == 0).then(|| 0xBF08 | (rng.below(15) as u32) << 4);
+    Case { opcode, it, source: None, state, buffer }
+}
+
+/// a register an instruction writes, r0-r11: never r12, which the program
+/// keeps its place in, SP or the PC.
+fn written(rng: &mut Rng) -> u32 {
+    rng.below(12) as u32
+}
+
+/// a register an instruction reads, r0-r12: never SP, which differs between
+/// the two, nor the PC, which most instructions can't take.
+fn read(rng: &mut Rng) -> u32 {
+    rng.below(13) as u32
+}
+
+/// the low n bits of a random word.
+fn field(rng: &mut Rng, n: u32) -> u32 {
+    rng.word() & ((1 << n) - 1)
+}
+
+fn pick(rng: &mut Rng, choices: &[u32]) -> u32 {
+    choices[rng.below(choices.len() as u64) as usize]
+}
+
+/// what a field meant to be zero holds: zero, but now and then not, to see
+/// that both refuse it.
+fn zero(rng: &mut Rng) -> u32 {
+    if rng.below(8) == 0 {
+        rng.below(12) as u32
+    } else {
+        0
+    }
+}
+
+/// an ARM instruction that computes in registers and flags, never touching
+/// memory or the PC, mostly with the condition always.
+fn arm_integer(rng: &mut Rng) -> u32 {
+    let cond = if rng.below(2) == 0 { 0xE } else { rng.below(15) as u32 };
+    let body = match rng.below(16) {
+        // data processing with an immediate or a register shifted by one,
+        // which may be the PC. TST, TEQ, CMP and CMN always set flags and
+        // have no destination, and MOV and MVN have no first operand
+        0..=5 => {
+            let opcode = field(rng, 4);
+            let compare = (8..=11).contains(&opcode);
+            let s = if compare { 1 } else { field(rng, 1) };
+            let d = if compare { zero(rng) } else { written(rng) };
+            let n = match opcode {
+                13 | 15 => zero(rng),
+                _ if rng.below(8) == 0 => 15,
+                _ => read(rng),
+            };
+            let operand = match rng.below(3) {
+                0 => 1 << 25 | field(rng, 12),
+                1 => {
+                    let m = if rng.below(8) == 0 { 15 } else { read(rng) };
+                    field(rng, 7) << 5 | m
+                }
+                // shifted by a register, where nothing may be the PC
+                _ => {
+                    let n = if opcode == 13 || opcode == 15 { n } else { read(rng) };
+                    return cond << 28
+                        | opcode << 21
+                        | s << 20
+                        | n << 16
+                        | d << 12
+                        | read(rng) << 8
+                        | field(rng, 2) << 5
+                        | 0x10
+                        | read(rng);
+                }
+            };
+            opcode << 21 | s << 20 | n << 16 | d << 12 | operand
+        }
+        // MUL, MLA, UMAAL, MLS, UMULL, UMLAL, SMULL and SMLAL, and the two
+        // encodings between them that are undefined. MUL has no accumulator
+        6 => {
+            let kind = field(rng, 4);
+            let high = written(rng);
+            let low = if kind < 2 { zero(rng) } else { (high + 1 + rng.below(11) as u32) % 12 };
+            kind << 20 | high << 16 | low << 12 | read(rng) << 8 | 0x90 | read(rng)
+        }
+        // SMLAxy, SMLAWy, SMULWy, SMLALxy and SMULxy, the saturating adds
+        // and subtracts, and CLZ
+        7 => match rng.below(3) {
+            0 => {
+                let (kind, x) = (field(rng, 2), field(rng, 1));
+                let high = written(rng);
+                // SMUL<x><y> and SMULW<y> have no accumulator
+                let plain = kind == 3 || (kind == 1 && x == 1);
+                let low = if plain { zero(rng) } else { (high + 1 + rng.below(11) as u32) % 12 };
+                0x0100_0080
+                    | kind << 21
+                    | high << 16
+                    | low << 12
+                    | read(rng) << 8
+                    | field(rng, 1) << 6
+                    | x << 5
+                    | read(rng)
+            }
+            1 => 0x0100_0050 | field(rng, 2) << 21 | read(rng) << 16 | written(rng) << 12 | read(rng),
+            _ => 0x016F_0F10 | written(rng) << 12 | read(rng),
+        },
+        // MRS, and MSR of the flags and GE from a register or an immediate
+        8 => match rng.below(3) {
+            0 => 0x010F_0000 | written(rng) << 12,
+            1 => 0x0120_F000 | (1 + rng.below(3) as u32) << 18 | read(rng),
+            _ => 0x0320_F000 | (1 + rng.below(3) as u32) << 18 | field(rng, 12),
+        },
+        // MOVW and MOVT
+        9 => 0x0300_0000 | field(rng, 1) << 22 | field(rng, 4) << 16 | written(rng) << 12 | field(rng, 12),
+        // the parallel adds and subtracts, signed, saturating, halving and
+        // their unsigned forms
+        10 => {
+            let kind = pick(rng, &[1, 2, 3, 5, 6, 7]);
+            let operation = pick(rng, &[0, 1, 2, 3, 4, 7]);
+            0x0600_0F10 | kind << 20 | read(rng) << 16 | written(rng) << 12 | operation << 5 | read(rng)
+        }
+        // packing, saturating, extending, reversing and SEL
+        11 => {
+            let (d, m) = (written(rng), read(rng));
+            // the extends without an addend have 1111 for n
+            let n = if rng.below(3) == 0 { 15 } else { read(rng) };
+            match rng.below(10) {
+                0 => 0x0680_0010 | n.min(12) << 16 | d << 12 | field(rng, 5) << 7 | field(rng, 1) << 6 | m,
+                1 => pick(rng, &[0x06A0_0010, 0x06E0_0010]) | field(rng, 5) << 16 | d << 12 | field(rng, 6) << 6 | m,
+                2 => pick(rng, &[0x06A0_0F30, 0x06E0_0F30]) | field(rng, 4) << 16 | d << 12 | m,
+                3..=6 => {
+                    let extend =
+                        pick(rng, &[0x0680_0070, 0x06A0_0070, 0x06B0_0070, 0x06C0_0070, 0x06E0_0070, 0x06F0_0070]);
+                    extend | n << 16 | d << 12 | field(rng, 2) << 10 | m
+                }
+                7 => 0x0680_0FB0 | read(rng) << 16 | d << 12 | m,
+                _ => pick(rng, &[0x06BF_0F30, 0x06BF_0FB0, 0x06FF_0F30, 0x06FF_0FB0]) | d << 12 | m,
+            }
+        }
+        // the signed multiplies, USAD8 and USADA8, and the divides the A9
+        // does not have. SMMLS always accumulates
+        12 => {
+            let (d, n, m) = (written(rng), read(rng), read(rng));
+            let a = if rng.below(3) == 0 { 15 } else { read(rng) };
+            match rng.below(7) {
+                0 => pick(rng, &[0x0700_0010, 0x0700_0050]) | d << 16 | a << 12 | m << 8 | field(rng, 1) << 5 | n,
+                1 => {
+                    let low = (d + 1 + rng.below(11) as u32) % 12;
+                    pick(rng, &[0x0740_0010, 0x0740_0050]) | d << 16 | low << 12 | m << 8 | field(rng, 1) << 5 | n
+                }
+                2 => 0x0750_0010 | d << 16 | a << 12 | m << 8 | field(rng, 1) << 5 | n,
+                3 => 0x0750_00D0 | d << 16 | read(rng) << 12 | m << 8 | field(rng, 1) << 5 | n,
+                4 => 0x0780_0010 | d << 16 | a << 12 | m << 8 | n,
+                _ => pick(rng, &[0x0710_F010, 0x0730_F010]) | d << 16 | m << 8 | n,
+            }
+        }
+        // SBFX, UBFX, BFC and BFI, some of them past the register's end
+        13 | 14 => {
+            let (d, n) = (written(rng), read(rng));
+            match rng.below(3) {
+                0 => pick(rng, &[0x07A0_0050, 0x07E0_0050]) | field(rng, 5) << 16 | d << 12 | field(rng, 5) << 7 | n,
+                1 => 0x07C0_001F | field(rng, 5) << 16 | d << 12 | field(rng, 5) << 7,
+                _ => 0x07C0_0010 | field(rng, 5) << 16 | d << 12 | field(rng, 5) << 7 | n,
+            }
+        }
+        // the hints, NOP, YIELD, WFE and SEV, and UDF
+        _ => match rng.below(2) {
+            0 => 0x0320_F000 | pick(rng, &[0, 1, 2, 4]),
+            _ => 0x07F0_00F0 | field(rng, 12) << 8 | field(rng, 4),
+        },
+    };
+    cond << 28 | body
+}
+
+/// a Thumb instruction of the same kinds, a halfword below 0x10000 or two
+/// with the first on top.
+fn thumb_integer(rng: &mut Rng) -> u32 {
+    let thumb32 = |first: u32, second: u32| first << 16 | second;
+    match rng.below(16) {
+        // shifts, adds, subtracts, moves and compares of the low registers,
+        // and the register data processing
+        0 => field(rng, 14),
+        1 => 0x4000 | field(rng, 10),
+        // ADD, CMP and MOV of any register but SP, writing r0-r11; CMP
+        // takes this form for a high register, one at least, and not the PC
+        2 => {
+            let kind = pick(rng, &[0, 1, 2]);
+            let mut d = written(rng);
+            let m = if kind != 1 && rng.below(8) == 0 { 15 } else { read(rng) };
+            if kind == 1 && d < 8 && m < 8 {
+                d = pick(rng, &[8, 9, 10, 11, 12]);
+            }
+            0x4400 | kind << 8 | (d >> 3) << 7 | m << 3 | (d & 7)
+        }
+        // LDR of a literal, ADR, the extends, the reversals and the hints
+        3 => match rng.below(5) {
+            0 => 0x4800 | field(rng, 11),
+            1 => 0xA000 | field(rng, 11),
+            2 => 0xB200 | field(rng, 8),
+            3 => 0xBA00 | pick(rng, &[0, 1, 3]) << 6 | field(rng, 6),
+            _ => 0xBF00 | pick(rng, &[0, 1, 2, 4]) << 4,
+        },
+        // data processing with a modified immediate or a shifted register:
+        // Rd 1111 with S makes TST, TEQ, CMN and CMP, Rn 1111 makes ORR and
+        // ORN MOV and MVN, and nothing else takes the PC
+        4..=8 => {
+            let shifted = rng.below(2) == 0;
+            let opcode = if shifted {
+                pick(rng, &[0, 1, 2, 3, 4, 6, 8, 10, 11, 13, 14])
+            } else {
+                pick(rng, &[0, 1, 2, 3, 4, 8, 10, 11, 13, 14])
+            };
+            let n = if (opcode == 2 || opcode == 3) && rng.below(2) == 0 { 15 } else { read(rng) };
+            let compare = [0, 4, 8, 13].contains(&opcode) && rng.below(4) == 0;
+            let (d, s) = if compare { (15, 1) } else { (written(rng), field(rng, 1)) };
+            if shifted {
+                let shift = field(rng, 3) << 12 | field(rng, 4) << 4;
+                thumb32(0xEA00 | opcode << 5 | s << 4 | n, shift | d << 8 | read(rng))
+            } else {
+                thumb32(
+                    0xF000 | field(rng, 1) << 10 | opcode << 5 | s << 4 | n,
+                    field(rng, 3) << 12 | d << 8 | field(rng, 8),
+                )
+            }
+        }
+        // with a plain immediate: ADDW, ADR, MOVW, SUBW, MOVT, SSAT, SSAT16,
+        // SBFX, BFI and BFC, USAT, USAT16 and UBFX. ADDW and SUBW of the PC
+        // are ADR, BFI of it BFC, and the saturations and bitfields have no
+        // i and no bit 5
+        9 => {
+            let opcode = pick(rng, &[0, 4, 10, 12, 16, 18, 20, 22, 24, 26, 28]);
+            let n = if [0, 10, 22].contains(&opcode) && rng.below(4) == 0 { 15 } else { read(rng) };
+            let (i, low) = if opcode >= 16 {
+                (zero(rng).min(1), field(rng, 8) & !0x30 | zero(rng).min(1) << 5 | zero(rng).min(1) << 4)
+            } else {
+                (field(rng, 1), field(rng, 8))
+            };
+            thumb32(0xF200 | i << 10 | opcode << 4 | n, field(rng, 3) << 12 | written(rng) << 8 | low)
+        }
+        // with registers: shifts by a register, extends, parallel adds and
+        // subtracts, the saturating ones, REV, SEL and CLZ. the extends
+        // without an addend have 1111 for Rn, and REV, REV16, RBIT, REVSH
+        // and CLZ name Rm twice
+        10 | 11 => {
+            let (kind, operation) = (field(rng, 4), field(rng, 4));
+            let m = read(rng);
+            let n = if kind < 8 && operation >= 8 && rng.below(3) == 0 {
+                15
+            } else if (kind == 9 || kind == 11) && operation & 0b1100 == 0b1000 {
+                m
+            } else {
+                read(rng)
+            };
+            thumb32(0xFA00 | kind << 4 | n, 0xF000 | written(rng) << 8 | operation << 4 | m)
+        }
+        // multiplies, Ra 1111 leaving the accumulator out but for MLS and
+        // SMMLS, which always have one
+        12 => {
+            let (kind, operation) = (field(rng, 3), field(rng, 2));
+            let always = (kind == 0 && operation == 1) || kind == 6;
+            let a = if !always && rng.below(3) == 0 { 15 } else { read(rng) };
+            thumb32(0xFB00 | kind << 4 | read(rng), a << 12 | written(rng) << 8 | operation << 4 | read(rng))
+        }
+        // long multiplies and the divides the A9 does not have
+        13 => {
+            let high = written(rng);
+            let low = (high + 1 + rng.below(11) as u32) % 12;
+            thumb32(0xFB80 | field(rng, 3) << 4 | read(rng), low << 12 | high << 8 | field(rng, 4) << 4 | read(rng))
+        }
+        // MRS, MSR of the flags and GE, and the hints
+        14 => match rng.below(3) {
+            0 => thumb32(0xF3EF, 0x8000 | written(rng) << 8),
+            1 => thumb32(0xF380 | read(rng), 0x8000 | (1 + rng.below(3) as u32) << 10),
+            _ => thumb32(0xF3AF, 0x8000 | pick(rng, &[0, 1, 2, 4])),
+        },
+        // UDF, both sizes
+        _ => match rng.below(2) {
+            0 => 0xDE00 | field(rng, 8),
+            _ => thumb32(0xF7F0 | field(rng, 4), 0xA000 | field(rng, 12)),
+        },
+    }
 }
 
 /// the ARM encoding as Thumb has it.
@@ -186,7 +470,7 @@ fn program(class: &str, cases: &[Case], thumb: bool) -> String {
         let _ = writeln!(s, "    movw {register}, #:lower16:{label}\n    movt {register}, #:upper16:{label}");
     };
     let _ = writeln!(s, ".syntax unified\n.text\n{state}\n.global _start\n_start:");
-    for signal in [4, 7, 11] {
+    for signal in [4, 5, 7, 11] {
         let _ = writeln!(s, "    mov r0, #{signal}");
         address(&mut s, "r1", "action");
         let _ = writeln!(s, "    mov r2, #0\n    mov r3, #8\n    mov r7, #174\n    svc #0");
@@ -203,8 +487,13 @@ fn program(class: &str, cases: &[Case], thumb: bool) -> String {
             writeln!(s, "    ldr r1, [r0, #52]\n    vmsr fpscr, r1\n    ldr r1, [r0, #48]\n    msr APSR_nzcvqg, r1");
         address(&mut s, "r12", &format!("out_{i}"));
         let _ = writeln!(s, "    ldm r0, {{r0-r11}}");
+        if let Some(it) = case.it {
+            let _ = writeln!(s, "    .inst.n 0x{it:04X}");
+        }
         if let Some(source) = &case.source {
             let _ = writeln!(s, "{source}");
+        } else if class == "thumb" && case.opcode < 0x1_0000 {
+            let _ = writeln!(s, "    .inst.n 0x{:04X}", case.opcode);
         } else if thumb {
             let _ = writeln!(s, "    .inst.w 0x{:08X}", thumb_encoding(class, case.opcode));
         } else {
@@ -349,6 +638,7 @@ fn run_kimika(elf: &Path) -> Vec<u8> {
                 memory.write32(cpu.regs[12], SIGILL);
                 cpu.regs[15] = memory.read32(DATA);
             }
+            Exit::Yield => {}
             exit => panic!("stopped with {exit:?}\n{cpu:?}"),
         }
     }
@@ -356,7 +646,9 @@ fn run_kimika(elf: &Path) -> Vec<u8> {
 
 fn disassemble(op: u32, thumb: bool) -> String {
     let triple = if thumb { "-triple=thumbv7a-none-eabi" } else { "-triple=armv7a-none-eabi" };
-    let bytes = if thumb {
+    let bytes = if thumb && op < 0x1_0000 {
+        (op as u16).to_le_bytes().to_vec()
+    } else if thumb {
         let (first, second) = ((op >> 16) as u16, op as u16);
         [first.to_le_bytes(), second.to_le_bytes()].concat()
     } else {
@@ -400,6 +692,15 @@ fn qemu_deviation(class: &str, op: u32) -> Option<&'static str> {
             Some("a fused multiply-add")
         }
         "vfp" if matches!(field(20, 4) & 0b1011, 0b1001 | 0b1010) => Some("a fused multiply-add"),
+        // SSAT16 and USAT16 with the bits above their four meant to be zero
+        // set, which QEMU takes as part of the width
+        "thumb" if op & 0xFB50_F0C0 == 0xF310_0000 && field(4, 2) != 0 => Some("a field meant to be zero"),
+        // a Thumb modified immediate repeating a zero byte, which ARM leaves
+        // unpredictable and QEMU takes as zero
+        "thumb" if op >= 0x1_0000 && op & 0xFA00_8000 == 0xF000_0000 => {
+            let imm12 = field(26, 1) << 11 | field(12, 3) << 8 | field(0, 8);
+            (imm12 >> 10 == 0 && imm12 >> 8 & 3 != 0 && imm12 & 0xFF == 0).then_some("an unpredictable immediate")
+        }
         "neon-memory" => {
             let d = field(22, 1) << 4 | field(12, 4);
             // the registers a structure reaches: so many elements, so far
@@ -457,7 +758,7 @@ fn describe(status: u32) -> String {
 /// each.
 fn run_source(source: &str, thumb: bool, assignments: &[String]) {
     let mut case =
-        Case { opcode: 0, source: Some(source.replace(';', "\n")), state: [0; STATE_WORDS], buffer: [0; 64] };
+        Case { opcode: 0, it: None, source: Some(source.replace(';', "\n")), state: [0; STATE_WORDS], buffer: [0; 64] };
     for assignment in assignments {
         let (name, value) = assignment.split_once('=').expect("name=value");
         if name == "buffer" {
@@ -529,7 +830,7 @@ fn main() {
     let seed: u64 = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(1);
     let hex = |i: usize| args.get(i).and_then(|a| u32::from_str_radix(a.trim_start_matches("0x"), 16).ok());
     let pattern = (hex(4).unwrap_or(0), hex(5).unwrap_or(0));
-    let thumb = class_arg.ends_with("-thumb");
+    let thumb = class_arg.ends_with("-thumb") || class_arg == "thumb";
     let class = class_arg.trim_end_matches("-thumb");
 
     let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
@@ -543,11 +844,14 @@ fn main() {
     assert_eq!(qemu.len(), kimika.len(), "the two wrote different amounts");
 
     let (mut ran, mut undefined, mut differing, mut known) = (0, 0, 0, 0);
+    let shown: usize = std::env::var("ORACLE_SHOW").ok().and_then(|n| n.parse().ok()).unwrap_or(40);
     for (i, case) in cases.iter().enumerate() {
         let base = (case_base(i) - DATA) as usize;
         let output = base + OUTPUT as usize;
         let (q, k) = (words(&qemu, output, STATE_WORDS + 1), words(&kimika, output, STATE_WORDS + 1));
         let mut report = String::new();
+        // Linux takes some UDFs for breakpoints, and QEMU with it
+        let q = if q[0] == SIGTRAP { [&[SIGILL][..], &q[1..]].concat() } else { q };
         if q[0] != k[0] {
             if (q[0], k[0]) == (RAN, SIGILL) && qemu_deviation(class, case.opcode).is_some() {
                 known += 1;
@@ -598,15 +902,23 @@ fn main() {
         }
         if !report.is_empty() {
             differing += 1;
-            if differing <= 40 {
+            if differing <= shown {
                 let shown = if thumb { thumb_encoding(class, case.opcode) } else { case.opcode };
-                println!("case {i}: 0x{shown:08X} {}", disassemble(shown, thumb));
-                let named: Vec<String> = [(12, 22), (16, 7), (0, 5)]
-                    .iter()
-                    .map(|&(field, extra)| ((case.opcode >> extra & 1) << 4 | (case.opcode >> field & 0xF)) as usize)
-                    .map(|r| format!("d{r}=0x{:08X}{:08X}", case.state[15 + 2 * r], case.state[14 + 2 * r]))
-                    .collect();
-                println!("  inputs {} fpscr=0x{:08X}", named.join(" "), case.state[13]);
+                let it = case.it.map_or(String::new(), |it| format!(" in a block of {}", disassemble(it, true)));
+                println!("case {i}: 0x{shown:08X} {}{it}", disassemble(shown, thumb));
+                if class == "arm" || class == "thumb" {
+                    let registers: Vec<String> = (0..12).map(|r| format!("r{r}=0x{:08X}", case.state[r])).collect();
+                    println!("  inputs {} apsr=0x{:08X}", registers.join(" "), case.state[12]);
+                } else {
+                    let named: Vec<String> = [(12, 22), (16, 7), (0, 5)]
+                        .iter()
+                        .map(|&(field, extra)| {
+                            ((case.opcode >> extra & 1) << 4 | (case.opcode >> field & 0xF)) as usize
+                        })
+                        .map(|r| format!("d{r}=0x{:08X}{:08X}", case.state[15 + 2 * r], case.state[14 + 2 * r]))
+                        .collect();
+                    println!("  inputs {} fpscr=0x{:08X}", named.join(" "), case.state[13]);
+                }
                 print!("{report}");
             }
         }

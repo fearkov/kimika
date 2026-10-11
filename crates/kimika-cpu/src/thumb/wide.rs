@@ -268,6 +268,11 @@ fn data_processing_plain_immediate(cpu: &mut Cpu, op: u32) -> Option<Exit> {
     let imm12 = (bit(op, 26) as u32) << 11 | bits(op, 12, 14) << 8 | (op & 0xFF);
     let shift = imm3_imm2(op);
     let field = op & 0x1F;
+    // the saturations and the bitfields have no use for i or bit 5, which
+    // are meant to be zero
+    if bit(op, 24) && (bit(op, 26) || bit(op, 5)) {
+        return cpu.undefined(op);
+    }
     match bits(op, 20, 24) {
         // ADDW and SUBW, ADR from the PC
         kind @ (0b00000 | 0b01010) => {
@@ -286,6 +291,11 @@ fn data_processing_plain_immediate(cpu: &mut Cpu, op: u32) -> Option<Exit> {
             }
             let unsigned = kind >= 0b11000;
             if kind & 0b10 != 0 && shift == 0 {
+                // the halfword forms take four bits, the two above meant to
+                // be zero
+                if bits(op, 4, 5) != 0 {
+                    return cpu.undefined(op);
+                }
                 let width = (op & 0xF) + if unsigned { 0 } else { 1 };
                 media::saturate16(cpu, d, n, width, unsigned);
             } else {
