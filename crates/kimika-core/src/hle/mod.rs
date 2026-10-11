@@ -8,6 +8,7 @@
 //! them, integers and pointers in r0-r3 and then on the stack, floats in
 //! s0-s15 and d0-d7, and [Call] reads them in that order.
 
+pub mod audio;
 pub mod clib;
 pub mod ctrl;
 pub mod display;
@@ -16,6 +17,7 @@ pub mod io;
 pub mod modules;
 pub mod sync;
 pub mod sysmem;
+pub mod system;
 pub mod threads;
 pub mod time;
 
@@ -39,6 +41,7 @@ fn functions() -> &'static HashMap<&'static str, Function> {
     static TABLE: OnceLock<HashMap<&'static str, Function>> = OnceLock::new();
     TABLE.get_or_init(|| {
         [
+            audio::FUNCTIONS,
             clib::FUNCTIONS,
             ctrl::FUNCTIONS,
             display::FUNCTIONS,
@@ -46,6 +49,7 @@ fn functions() -> &'static HashMap<&'static str, Function> {
             modules::FUNCTIONS,
             sync::FUNCTIONS,
             sysmem::FUNCTIONS,
+            system::FUNCTIONS,
             threads::FUNCTIONS,
             time::FUNCTIONS,
         ]
@@ -79,6 +83,7 @@ pub struct State {
     pub sampling_mode: Mutex<u32>,
     pub files: Mutex<io::Files>,
     pub gxm: Mutex<gxm::State>,
+    pub audio: Mutex<audio::Ports>,
 }
 
 impl State {
