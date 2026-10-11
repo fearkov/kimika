@@ -8,6 +8,7 @@
 //! rest of the emulator.
 
 pub mod blend;
+pub mod color;
 pub mod convert;
 pub mod raster;
 pub mod state;

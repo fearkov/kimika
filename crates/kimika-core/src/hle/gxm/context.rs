@@ -120,6 +120,9 @@ pub struct Context {
     pub vertex_uniform_buffers: [u32; UNIFORM_BUFFERS],
     pub fragment_uniform_buffers: [u32; UNIFORM_BUFFERS],
     pub render: RenderState,
+    /// whether the game set a viewport, without which each scene gets one
+    /// covering its target.
+    pub viewport_set: bool,
     pub scene: Option<Scene>,
 }
 
@@ -236,7 +239,14 @@ fn begin_scene(call: &mut Call) {
         color: ColorSurface::read(memory, color),
         depth_stencil: DepthStencilSurface::read(memory, depth_stencil),
     });
+    // a scene starts drawing over the whole target, and a game that never
+    // set a viewport gets one mapping clip space onto it
     context.render.region_clip = RegionClip::from_gxm(0xC000_0000, [0, 0, width - 1, height - 1]);
+    if !context.viewport_set {
+        let (half_width, half_height) = (width as f32 / 2.0, height as f32 / 2.0);
+        context.render.viewport.offset = [half_width, half_height, 0.5];
+        context.render.viewport.scale = [half_width, -half_height, 0.5];
+    }
     call.ret(0u32);
 }
 
@@ -456,6 +466,7 @@ fn set_viewport(call: &mut Call) {
         let viewport = &mut context.render.viewport;
         viewport.offset = [x_offset, y_offset, z_offset];
         viewport.scale = [x_scale, y_scale, z_scale];
+        context.viewport_set = true;
     });
 }
 
@@ -486,5 +497,6 @@ fn set_default_region_clip_and_viewport(call: &mut Call) {
         let viewport = &mut context.render.viewport;
         viewport.offset = [half_width, half_height, 0.5];
         viewport.scale = [half_width, -half_height, 0.5];
+        context.viewport_set = true;
     });
 }
