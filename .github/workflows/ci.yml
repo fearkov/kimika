@@ -1,0 +1,23 @@
+# builds and tests Kimika on Linux and Windows, with llvm-mc and ld.lld for
+# the CPU tests, which assemble what they run
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: LLVM for the CPU tests
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y llvm lld
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --workspace
+      - run: cargo test --release --workspace

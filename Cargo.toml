@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kimika-cpu",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/fearkov/kimika"
+
+[workspace.dependencies]
+kimika-cpu = { path = "crates/kimika-cpu" }
+
+log = "0.4"
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+# the interpreter is unusably slow in a plain debug build
+[profile.dev.package.kimika-cpu]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "unwind"
+debug = 1

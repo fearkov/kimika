@@ -1,0 +1,9 @@
+[package]
+name = "kimika-cpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "An interpreter for the PlayStation Vita's Cortex-A9: ARMv7 ARM and Thumb-2, VFPv3 and NEON, in user mode"
+
+[dependencies]
+log.workspace = true
