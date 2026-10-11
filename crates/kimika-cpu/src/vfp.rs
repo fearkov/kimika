@@ -510,7 +510,7 @@ pub fn load_store<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<Exit> {
         return None;
     }
     // VLDM and VSTM increment after, or decrement before with writeback,
-    // which the PC can't take
+    // which the PC cannot take
     if index == add || (n == PC && writeback) {
         return cpu.undefined(op);
     }

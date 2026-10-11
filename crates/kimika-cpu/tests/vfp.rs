@@ -258,7 +258,7 @@ fn system_registers() {
 #[test]
 fn short_vectors_step_through_their_bank() {
     // LEN 4, STRIDE 1: s8-s11 = s16-s19 + s24, with s24 a scalar in the
-    // last bank it isn't, so it steps too
+    // last bank it is not, so it steps too
     let Some(r) = run_with("vmsr fpscr, r0\n vadd.f32 s8, s16, s24\n mov r1, #0\n vmsr fpscr, r1", |cpu, _| {
         cpu.regs[0] = 3 << 16;
         for i in 0..4 {

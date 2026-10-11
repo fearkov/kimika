@@ -44,7 +44,7 @@ pub fn data_processing(cpu: &mut Cpu, op: u32) -> Option<Exit> {
     }
 }
 
-/// an instruction NEON doesn't have, given as it was fetched: in Thumb data
+/// an instruction NEON does not have, given as it was fetched: in Thumb data
 /// processing is 111U 1111 where ARM has 1111 001U, and the loads and stores
 /// 1111 1001 where ARM has 1111 0100.
 #[cold]

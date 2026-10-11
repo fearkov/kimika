@@ -67,7 +67,7 @@ pub fn long(
     }
 }
 
-/// UMAAL, the product plus both halves of the pair, which can't overflow.
+/// UMAAL, the product plus both halves of the pair, which cannot overflow.
 pub fn umaal(cpu: &mut Cpu, low: usize, high: usize, n: usize, m: usize) {
     let sum = cpu.regs[n] as u64 * cpu.regs[m] as u64 + cpu.regs[low] as u64 + cpu.regs[high] as u64;
     set_pair(cpu, low, high, sum);

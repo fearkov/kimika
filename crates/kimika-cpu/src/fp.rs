@@ -14,7 +14,7 @@
 //!
 //! a result is flushed when it comes out subnormal, after rounding. ARM
 //! looks before rounding, so a result just under the smallest normal number
-//! that rounds up to it flushes there and doesn't here, which is the one
+//! that rounds up to it flushes there and does not here, which is the one
 //! place this differs from the hardware. recompiled code does the same as
 //! this, so the two always agree.
 
@@ -228,7 +228,7 @@ impl Float for f64 {
         sum_error!(a, b, sum)
     }
     // with a fused multiply-add the error comes out exact, so long as it
-    // isn't below the subnormals; where it could be, the operands are
+    // is not below the subnormals; where it could be, the operands are
     // scaled by a power of two first, which changes no comparison
     fn product_error(a: f64, b: f64, product: f64) -> Ordering {
         if product == 0.0 {

@@ -19,7 +19,7 @@
 //! an instruction the CPU refuses raises SIGILL under QEMU, which the
 //! program catches and notes, and Exit::Undefined here, which this notes the
 //! same way. FPSCR's cumulative exception flags are left out of the
-//! comparison, as the interpreter doesn't keep them.
+//! comparison, as the interpreter does not keep them.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -379,7 +379,7 @@ fn disassemble(op: u32, thumb: bool) -> String {
 }
 
 /// where QEMU is known to part from the interpreter: QEMU runs VFPv4's
-/// fused multiply-adds, which the A9's VFPv3 doesn't have, and lets a list
+/// fused multiply-adds, which the A9's VFPv3 does not have, and lets a list
 /// of registers run past d31 and around to d0, which ARM leaves
 /// unpredictable and the interpreter refuses. VTRN.32 of a register with
 /// itself, whose result ARM leaves unknown, swaps its lanes under QEMU.

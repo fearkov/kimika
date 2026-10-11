@@ -231,7 +231,7 @@ fn unconditional<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<Exit> {
         0x41 | 0x45 | 0x49 | 0x4D | 0x51 | 0x55 | 0x59 | 0x5D | 0x61 | 0x65 | 0x69 | 0x6D | 0x71 | 0x75 | 0x79
         | 0x7D => None,
         // SETEND LE, which is what the Vita runs in, and CPS, which user mode
-        // can't change anything with
+        // cannot change anything with
         0x10 if bit(op, 16) && bits(op, 4, 7) == 0 && !bit(op, 9) => None,
         0x10 if !bit(op, 16) => None,
         _ => cpu.undefined(op),

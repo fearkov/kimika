@@ -1,7 +1,7 @@
 //! Thumb state, decoded the way the ARMv7 manual lays it out, chapter A6:
 //! the 16-bit instructions here, Thumb-2's 32-bit ones in wide.
 //!
-//! inside an IT block the 16-bit instructions that would set flags don't,
+//! inside an IT block the 16-bit instructions that would set flags do not,
 //! and the conditions come from the block, which the fetch loop checks.
 
 mod wide;
@@ -244,7 +244,7 @@ fn miscellaneous<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<Exit> {
         0b0000000..=0b0000011 => cpu.regs[SP] = cpu.regs[SP].wrapping_add((op & 0x7F) * 4),
         0b0000100..=0b0000111 => cpu.regs[SP] = cpu.regs[SP].wrapping_sub((op & 0x7F) * 4),
         0b0001000..=0b0001111 | 0b0011000..=0b0011111 | 0b1001000..=0b1001111 | 0b1011000..=0b1011111 => {
-            // CBZ and CBNZ, which can't be in an IT block
+            // CBZ and CBNZ, which cannot be in an IT block
             if cpu.cpsr.in_it_block() {
                 return cpu.undefined(op);
             }
@@ -267,7 +267,7 @@ fn miscellaneous<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<Exit> {
             }
             cpu.regs[SP] = lowest;
         }
-        // CPS, which user mode can't change anything with
+        // CPS, which user mode cannot change anything with
         0b0110011 => {}
         0b1010000 | 0b1010001 => cpu.regs[d] = media::reverse(cpu.regs[m], 0),
         0b1010010 | 0b1010011 => cpu.regs[d] = media::reverse(cpu.regs[m], 1),

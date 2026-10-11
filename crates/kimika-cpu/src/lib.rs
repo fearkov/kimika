@@ -83,7 +83,7 @@ pub enum Exit {
     Timeout,
     /// an svc ran, its immediate here and the pc already past it.
     Supervisor(u32),
-    /// an instruction the CPU doesn't have, or that does nothing defined,
+    /// an instruction the CPU does not have, or that does nothing defined,
     /// with the opcode as fetched: a Thumb instruction of 32 bits has its
     /// first halfword on top.
     Undefined {
@@ -189,7 +189,7 @@ impl Cpu {
     }
 
     /// a write of the PC by data processing, which interworks in ARM state
-    /// since ARMv7 and doesn't in Thumb.
+    /// since ARMv7 and does not in Thumb.
     #[inline(always)]
     pub fn alu_write_pc(&mut self, addr: u32) {
         if self.cpsr.thumb {
@@ -212,7 +212,7 @@ impl Cpu {
         self.regs[PC] & !3
     }
 
-    /// the instruction running can't run: undefined, or unpredictable,
+    /// the instruction running cannot run: undefined, or unpredictable,
     /// which the CPU treats the same so that recompiled code and the
     /// interpreter never pick different meanings for it.
     #[cold]

@@ -92,7 +92,7 @@ fn toolchain_available() -> bool {
         let ok = ["llvm-mc", "ld.lld"].iter().all(|tool| Command::new(tool).arg("--version").output().is_ok());
         if !ok {
             eprintln!(
-                "note: llvm-mc or ld.lld is missing, so the CPU tests that assemble their programs don't run. \
+                "note: llvm-mc or ld.lld is missing, so the CPU tests that assemble their programs do not run. \
                  the llvm and lld packages have them"
             );
         }

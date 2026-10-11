@@ -639,7 +639,7 @@ fn ldrexd_and_strexd_move_a_pair() {
     assert_reg!(r, 2, 0);
     assert_eq!(r.bus.read_u32(DATA_BASE + 4), 0x7777_7777);
     assert_reg!(r, 8, 0x66);
-    // a halfword STREX after a byte LDREX doesn't match its mark
+    // a halfword STREX after a byte LDREX does not match its mark
     assert_reg!(r, 9, 1);
 }
 

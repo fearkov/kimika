@@ -148,7 +148,7 @@ fn an_it_block_runs_its_then_and_else() {
 
 #[test]
 fn inside_an_it_block_the_short_alu_ops_leave_the_flags() {
-    // adds outside a block sets flags, add inside one doesn't
+    // adds outside a block sets flags, add inside one does not
     let Some(r) = run_thumb_with("cmp r0, r0\n itt eq\n addeq r1, r1, r2\n addeq r3, r1, r2", |cpu, _| {
         cpu.regs[1] = 0xFFFF_FFFF;
         cpu.regs[2] = 1;
@@ -481,7 +481,7 @@ fn the_unpredictable_is_undefined() {
     let cases: [(&[u16], &str); 7] = [
         (&[0xBF08, 0xBF08], "an IT inside an IT block"),
         (&[0xBF08, 0xD000], "a conditional branch inside an IT block"),
-        (&[0xBF0C, 0xE7FE, 0xBF00], "a B that doesn't end its IT block"),
+        (&[0xBF0C, 0xE7FE, 0xBF00], "a B that does not end its IT block"),
         (&[0xE890, 0x2006], "ldm.w r0, {r1, r2, sp}"),
         (&[0xE8B0, 0x0003], "ldmia.w r0!, {r0, r1}"),
         (&[0xFB90, 0xF0F1], "sdiv r0, r0, r1, which the Cortex-A9 lacks"),

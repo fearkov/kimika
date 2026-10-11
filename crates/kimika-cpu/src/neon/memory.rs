@@ -1,6 +1,6 @@
 //! A7.7, the element and structure loads and stores, VLD1-4 and VST1-4.
 //! a structure is one element from each of up to four registers, laid out
-//! one after another in memory. alignment isn't checked: the hardware's
+//! one after another in memory. alignment is not checked: the hardware's
 //! faults are something no game counts on.
 
 use super::{lane, registers, set_lane, undefined};

@@ -14,7 +14,7 @@ pub struct Cp15 {
 
 impl Cp15 {
     /// MRC p15, opc1, Rt, CRn, CRm, opc2, none for a register user mode
-    /// can't read.
+    /// cannot read.
     pub fn read(&self, opc1: u32, crn: u32, crm: u32, opc2: u32) -> Option<u32> {
         match (opc1, crn, crm, opc2) {
             (0, 13, 0, 2) => Some(self.thread_id_rw),
@@ -24,7 +24,7 @@ impl Cp15 {
     }
 
     /// MCR p15, opc1, Rt, CRn, CRm, opc2, false for a register user mode
-    /// can't write.
+    /// cannot write.
     pub fn write(&mut self, opc1: u32, crn: u32, crm: u32, opc2: u32, value: u32) -> bool {
         match (opc1, crn, crm, opc2) {
             (0, 13, 0, 2) => self.thread_id_rw = value,

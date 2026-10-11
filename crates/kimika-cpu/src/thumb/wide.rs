@@ -320,7 +320,7 @@ fn branches_and_control<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<E
     let ends_block = !cpu.cpsr.in_it_block() || last_in_it_block(cpu);
     match op1 {
         0b000 | 0b010 if kind & 0b0111000 != 0b0111000 => {
-            // B with a condition, which an IT block can't have
+            // B with a condition, which an IT block cannot have
             if cpu.cpsr.in_it_block() {
                 return cpu.undefined(op);
             }
@@ -341,7 +341,7 @@ fn branches_and_control<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<E
                 }
                 misc::write_status(cpu, op, cpu.regs[n], mask, bit(op, 20))
             }
-            // the hints, and CPS, which user mode can't change anything with
+            // the hints, and CPS, which user mode cannot change anything with
             0b0111010 if bits(op, 8, 10) == 0 => misc::hint(op & 0xFF),
             0b0111010 => None,
             0b0111011 => match bits(op, 4, 7) {
@@ -625,6 +625,6 @@ fn coprocessor<B: Bus>(cpu: &mut Cpu, bus: &mut B, op: u32) -> Option<Exit> {
     if op >> 28 == 0b1110 {
         return crate::arm::execute(cpu, bus, op);
     }
-    // MCR2 and the other "2" forms, for coprocessors the Vita doesn't have
+    // MCR2 and the other "2" forms, for coprocessors the Vita does not have
     cpu.undefined(op)
 }

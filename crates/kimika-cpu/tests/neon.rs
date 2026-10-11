@@ -1127,7 +1127,7 @@ fn thumb_encodings() {
     assert_eq!(r.cpu.vfp.fpscr, QC);
 }
 
-/// what the Cortex-A9 doesn't have, or ARM leaves unpredictable: a Q form
+/// what the Cortex-A9 does not have, or ARM leaves unpredictable: a Q form
 /// with an odd register, VFPv4's VFMA, ARMv8's VRINTN, AESE and SHA1C, and a
 /// list of registers past d31.
 #[test]
