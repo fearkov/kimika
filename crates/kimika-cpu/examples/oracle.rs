@@ -546,7 +546,7 @@ fn build(source: &str, dir: &Path) -> PathBuf {
     let (asm, object, elf) = (dir.join("oracle.s"), dir.join("oracle.o"), dir.join("oracle.elf"));
     std::fs::write(&asm, source).expect("write the program");
     let out = Command::new("llvm-mc")
-        .args(["-triple=armv7a-linux-gnueabihf", "-mcpu=cortex-a9", "-filetype=obj", "-o"])
+        .args(["-triple=armv7a-linux-gnueabihf", "-mcpu=cortex-a9", "-mattr=+neon,+vfp3,+fp16", "-filetype=obj", "-o"])
         .arg(&object)
         .arg(&asm)
         .output()

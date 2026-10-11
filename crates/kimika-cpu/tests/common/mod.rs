@@ -117,7 +117,7 @@ pub fn assemble(source: &str) -> Vec<u8> {
     drop(file);
 
     let out = Command::new("llvm-mc")
-        .args(["-triple=armv7a-none-eabi", "-mcpu=cortex-a9", "-filetype=obj", "-o"])
+        .args(["-triple=armv7a-none-eabi", "-mcpu=cortex-a9", "-mattr=+neon,+vfp3,+fp16", "-filetype=obj", "-o"])
         .arg(&object_path)
         .arg(&source_path)
         .output()
