@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/kimika-cpu",
+    "crates/kimika-core",
 ]
 
 [workspace.package]
@@ -13,8 +14,11 @@ repository = "https://github.com/fearkov/kimika"
 
 [workspace.dependencies]
 kimika-cpu = { path = "crates/kimika-cpu" }
+kimika-core = { path = "crates/kimika-core" }
+vita-module = { git = "https://github.com/fearkov/vitarecomp" }
 
 log = "0.4"
+thiserror = "2"
 
 [profile.dev]
 opt-level = 1

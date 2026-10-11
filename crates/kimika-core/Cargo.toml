@@ -1,0 +1,23 @@
+[package]
+name = "kimika-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The PlayStation Vita as a game sees it: memory, modules, threads and the system libraries, run on kimika-cpu"
+
+[dependencies]
+kimika-cpu.workspace = true
+vita-module.workspace = true
+log.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Memory"] }
+
+[dev-dependencies]
+# the module builders, to make up games for the tests
+vita-module = { workspace = true, features = ["testing"] }
+env_logger = "0.11"
