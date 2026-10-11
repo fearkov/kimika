@@ -12,6 +12,7 @@ pub mod clib;
 pub mod ctrl;
 pub mod display;
 pub mod io;
+pub mod modules;
 pub mod sysmem;
 pub mod threads;
 pub mod time;
@@ -21,6 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use kimika_cpu::Cpu;
 
+use crate::kernel::thread::{self, Stop};
 use crate::kernel::Thread;
 use crate::memory::Memory;
 use crate::Shared;
@@ -38,6 +40,7 @@ fn functions() -> &'static HashMap<&'static str, Function> {
             ctrl::FUNCTIONS,
             display::FUNCTIONS,
             io::FUNCTIONS,
+            modules::FUNCTIONS,
             sysmem::FUNCTIONS,
             threads::FUNCTIONS,
             time::FUNCTIONS,
@@ -278,6 +281,27 @@ impl<'a> Call<'a> {
     /// a result that is a value or an error code, both in r0.
     pub fn result(&mut self, result: Result<u32, u32>) {
         self.cpu.regs[0] = result.unwrap_or_else(|error| error);
+    }
+
+    // -- calling back ---
+
+    /// calls a guest function on the calling thread, its stack and its
+    /// registers, which are as they were afterwards, and gives what it
+    /// returned; none if it ended the thread or the process instead, which
+    /// then ends once this call returns. read every argument before.
+    pub fn call_guest(&mut self, function: u32, arguments: &[u32]) -> Option<u32> {
+        match thread::call_guest(self.shared, self.thread, self.cpu, function, arguments) {
+            Ok(result) => Some(result),
+            Err(Stop::ExitThread(status)) => {
+                self.control = Control::ExitThread(status);
+                None
+            }
+            Err(Stop::ExitProcess(status)) => {
+                self.control = Control::ExitProcess(status);
+                None
+            }
+            Err(Stop::Returned(_) | Stop::Stopped) => None,
+        }
     }
 
     /// ends the calling thread once the function returns.

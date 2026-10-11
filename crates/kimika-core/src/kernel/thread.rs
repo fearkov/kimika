@@ -6,7 +6,7 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use kimika_cpu::{Cpu, Exit, LR};
+use kimika_cpu::{Cpu, Exit, LR, PC, SP};
 
 use super::{errors, Uid};
 use crate::hle::{self, Control};
@@ -160,6 +160,13 @@ impl Thread {
 /// starts a dormant thread on a host thread of its own, with arguments
 /// copied to the top of its stack, the way sceKernelStartThread does.
 pub fn start(shared: &Arc<Shared>, thread: &Arc<Thread>, arguments: &[u8]) -> Result<(), u32> {
+    start_after(shared, thread, arguments, Vec::new())
+}
+
+/// starts a thread as [start] does, calling the functions in first, with
+/// no arguments, before it goes to its entry: the process's first thread
+/// starts the modules loaded with the program this way.
+pub fn start_after(shared: &Arc<Shared>, thread: &Arc<Thread>, arguments: &[u8], first: Vec<u32>) -> Result<(), u32> {
     {
         let mut state = thread.state.lock().unwrap();
         if *state != State::Dormant {
@@ -198,7 +205,7 @@ pub fn start(shared: &Arc<Shared>, thread: &Arc<Thread>, arguments: &[u8]) -> Re
     let running = (Arc::clone(shared), Arc::clone(thread));
     let handle = std::thread::Builder::new()
         .name(thread.name.clone())
-        .spawn(move || run(running.0, running.1, cpu))
+        .spawn(move || run(running.0, running.1, cpu, first))
         .map_err(|error| {
             log::error!("could not start a host thread, {error}");
             errors::ERROR
@@ -207,28 +214,70 @@ pub fn start(shared: &Arc<Shared>, thread: &Arc<Thread>, arguments: &[u8]) -> Re
     Ok(())
 }
 
-/// a thread's life: guest code for as long as it runs, HLE calls when it
-/// reaches an import, until it or the process ends.
-fn run(shared: Arc<Shared>, thread: Arc<Thread>, mut cpu: Cpu) {
+/// a thread's life: the functions it was given to call first, then guest
+/// code from its entry for as long as it runs, HLE calls when it reaches an
+/// import, until it or the process ends.
+fn run(shared: Arc<Shared>, thread: Arc<Thread>, mut cpu: Cpu, first: Vec<u32>) {
     log::debug!("thread {} 0x{:08X} starts at 0x{:08X}", thread.name, thread.uid, thread.entry);
+    shared.kernel.cores.acquire(&shared);
+    let mut stop = None;
+    for function in first {
+        match call_guest(&shared, &thread, &mut cpu, function, &[0, 0]) {
+            Ok(0) => {}
+            Ok(result) => log::warn!("{}: 0x{function:08X} returned 0x{result:08X} before the entry", thread.name),
+            Err(early) => {
+                stop = Some(early);
+                break;
+            }
+        }
+    }
+    let status = match stop.unwrap_or_else(|| execute(&shared, &thread, &mut cpu)) {
+        Stop::Returned(status) => status as i32,
+        Stop::ExitThread(status) => status,
+        Stop::ExitProcess(status) => {
+            shared.finish(Outcome::Exited(status));
+            status
+        }
+        Stop::Stopped => 0,
+    };
+    shared.kernel.cores.release();
+    thread.end(status);
+    log::debug!("thread {} ends with {status}", thread.name);
+    // the process lasts as long as its first thread
+    if thread.main {
+        shared.finish(Outcome::Exited(status));
+    }
+}
+
+/// how guest code stopped running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stop {
+    /// the function it was in returned to the kernel's trap, with r0.
+    Returned(u32),
+    ExitThread(i32),
+    ExitProcess(i32),
+    /// the process is ending, or the thread did what ends it.
+    Stopped,
+}
+
+/// runs guest code on cpu, as the thread, until the function it is in
+/// returns to the kernel's trap or the thread or the process ends. the
+/// thread holds a core throughout.
+pub fn execute(shared: &Arc<Shared>, thread: &Arc<Thread>, cpu: &mut Cpu) -> Stop {
     let mut bus = GuestBus(&shared.memory);
     let mut undefined_seen = std::collections::HashSet::new();
-    shared.kernel.cores.acquire(&shared);
-    let status = loop {
+    loop {
         if shared.is_stopping() {
-            break 0;
+            return Stop::Stopped;
         }
         match cpu.run(&mut bus, SLICE) {
-            Exit::Timeout => shared.kernel.cores.checkpoint(&shared),
-            Exit::Yield => shared.kernel.cores.yield_now(&shared),
-            Exit::Supervisor(RETURN_SVC) => break cpu.regs[0] as i32,
-            Exit::Supervisor(index) => match hle::call(&shared, &thread, &mut cpu, index) {
+            Exit::Timeout => shared.kernel.cores.checkpoint(shared),
+            Exit::Yield => shared.kernel.cores.yield_now(shared),
+            Exit::Supervisor(RETURN_SVC) => return Stop::Returned(cpu.regs[0]),
+            Exit::Supervisor(index) => match hle::call(shared, thread, cpu, index) {
                 Control::Continue => {}
-                Control::ExitThread(status) => break status,
-                Control::ExitProcess(status) => {
-                    shared.finish(Outcome::Exited(status));
-                    break status;
-                }
+                Control::ExitThread(status) => return Stop::ExitThread(status),
+                Control::ExitProcess(status) => return Stop::ExitProcess(status),
             },
             // one bad decode should not end the session
             Exit::Undefined { pc, opcode } => {
@@ -238,17 +287,49 @@ fn run(shared: Arc<Shared>, thread: Arc<Thread>, mut cpu: Cpu) {
             }
             Exit::Breakpoint { pc, imm } => {
                 shared.finish(Outcome::Faulted(format!("{} reached bkpt #{imm} at 0x{pc:08X}", thread.name)));
-                break 0;
+                return Stop::Stopped;
             }
-            Exit::Halted => break 0,
+            Exit::Halted => return Stop::Stopped,
         }
-    };
-    shared.kernel.cores.release();
-    thread.end(status);
-    log::debug!("thread {} ends with {status}", thread.name);
-    // the process lasts as long as its first thread
-    if thread.main {
-        shared.finish(Outcome::Exited(status));
+    }
+}
+
+/// calls a guest function, odd for Thumb, from the kernel on the thread's
+/// own cpu and stack, with arguments as the calling convention passes
+/// them, and gives what it returns in r0. the thread's registers are as
+/// they were afterwards. a function that ends the thread or the process
+/// instead gives how.
+pub fn call_guest(
+    shared: &Arc<Shared>,
+    thread: &Arc<Thread>,
+    cpu: &mut Cpu,
+    function: u32,
+    arguments: &[u32],
+) -> Result<u32, Stop> {
+    let (registers, cpsr) = (cpu.regs, cpu.cpsr);
+    // below whatever the caller has on its stack, eight byte aligned, with
+    // the arguments past the fourth
+    let extra = arguments.get(4..).unwrap_or_default();
+    let sp = (cpu.regs[SP] & !7) - (extra.len() as u32 * 4).next_multiple_of(8);
+    for (index, &argument) in extra.iter().enumerate() {
+        shared.memory.write32(sp + index as u32 * 4, argument);
+    }
+    for (index, &argument) in arguments.iter().take(4).enumerate() {
+        cpu.regs[index] = argument;
+    }
+    cpu.regs[SP] = sp;
+    cpu.regs[LR] = RETURN_TRAP;
+    cpu.regs[PC] = function & !1;
+    cpu.cpsr.thumb = function & 1 != 0;
+    cpu.cpsr.it = 0;
+    let stop = execute(shared, thread, cpu);
+    match stop {
+        Stop::Returned(result) => {
+            cpu.regs = registers;
+            cpu.cpsr = cpsr;
+            Ok(result)
+        }
+        _ => Err(stop),
     }
 }
 

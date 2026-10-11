@@ -1734,7 +1734,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vita-module"
 version = "0.1.0"
-source = "git+https://github.com/fearkov/vitarecomp#4489c7892635f47078a819b24067fc34809d0176"
+source = "git+https://github.com/fearkov/vitarecomp#7639525ec106e3cb1c7522311a603f82ce50f21b"
 dependencies = [
  "miniz_oxide",
  "thiserror 2.0.21",

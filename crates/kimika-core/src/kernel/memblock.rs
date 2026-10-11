@@ -84,9 +84,25 @@ impl Blocks {
         Some(candidate as u32)
     }
 
-    /// gives a range the kernel took back.
-    pub fn untake(&mut self, base: u32) {
-        self.taken.remove(&base);
+    /// takes a range at base if nothing there is taken.
+    pub fn take_at(&mut self, base: u32, size: u32) -> bool {
+        let end = base as u64 + size as u64;
+        let overlaps = self
+            .taken
+            .range(..end.min(u32::MAX as u64 + 1) as u32)
+            .next_back()
+            .is_some_and(|(&other, &length)| other as u64 + length as u64 > base as u64)
+            || self.taken.range(base..).next().is_some_and(|(&other, _)| (other as u64) < end);
+        if overlaps || end > u32::MAX as u64 + 1 {
+            return false;
+        }
+        self.taken.insert(base, size);
+        true
+    }
+
+    /// gives a range the kernel took back, and says how big it was.
+    pub fn untake(&mut self, base: u32) -> Option<u32> {
+        self.taken.remove(&base)
     }
 
     /// a new block of a type, its size checked against the type's step and
@@ -148,6 +164,18 @@ mod tests {
         // freed, its place is the first to go again
         blocks.free(1).unwrap();
         assert_eq!(blocks.allocate(7, "again", USER_RW, 0x1000, None).unwrap().base, 0x8105_8000);
+    }
+
+    #[test]
+    fn a_range_is_taken_where_asked_only_if_it_is_free() {
+        let mut blocks = Blocks::default();
+        assert!(blocks.take_at(0x8100_0000, 0x2000));
+        assert!(!blocks.take_at(0x8100_1000, 0x1000));
+        assert!(!blocks.take_at(0x80FF_F000, 0x2000));
+        assert!(blocks.take_at(0x8100_2000, 0x1000));
+        assert!(blocks.take_at(0x80FF_F000, 0x1000));
+        assert_eq!(blocks.untake(0x8100_0000), Some(0x2000));
+        assert!(blocks.take_at(0x8100_1000, 0x1000));
     }
 
     #[test]

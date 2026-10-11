@@ -12,6 +12,7 @@ pub mod hle;
 pub mod kernel;
 pub mod loader;
 pub mod memory;
+pub mod vfs;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,6 +63,7 @@ pub struct Shared {
     pub kernel: Kernel,
     pub display: display::Display,
     pub hle: hle::State,
+    pub vfs: vfs::Vfs,
     /// when the process started, which its clock counts from.
     pub started: Instant,
     outcome: Mutex<Option<Outcome>>,
@@ -69,8 +71,9 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(config: Config) -> Shared {
+    pub fn new(config: Config, vfs: vfs::Vfs) -> Shared {
         Shared {
+            vfs,
             kernel: Kernel::new(config.cores),
             config,
             memory: Memory::new(),

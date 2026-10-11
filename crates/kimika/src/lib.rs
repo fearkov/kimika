@@ -6,7 +6,7 @@ mod cli;
 mod input;
 mod present;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use kimika_core::{Config, System};
@@ -41,7 +41,11 @@ pub fn run() {
         eprintln!("{}", cli::USAGE);
         std::process::exit(2);
     };
-    let system = match kimika_core::load(Path::new(&game), Config::default()) {
+    let data_dir = options.data.as_ref().map(PathBuf::from).or_else(default_data_dir);
+    if let Some(data_dir) = &data_dir {
+        log::info!("keeping ux0: and the saves in {}", data_dir.display());
+    }
+    let system = match kimika_core::load(Path::new(&game), Config { data_dir, ..Config::default() }) {
         Ok(system) => system,
         Err(error) => {
             eprintln!("kimika: could not load {game}, {error}");
@@ -71,6 +75,20 @@ pub fn run() {
     }
     app.system.stop();
     report(&app.system);
+}
+
+/// kimika in the user's data folder: XDG_DATA_HOME or ~/.local/share on
+/// unix, APPDATA on Windows.
+fn default_data_dir() -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+    };
+    base.map(|base| base.join("kimika"))
 }
 
 /// runs the game for so many frames with no window, then says how it went.

@@ -62,8 +62,33 @@ pub const LW_MUTEX_NOT_OWNED: u32 = 0x8002_8186;
 pub const IO_NOENT: u32 = 0x8001_0002;
 /// 0x80010009, a file descriptor that is not open, EBADF.
 pub const IO_BADF: u32 = 0x8001_0009;
+/// 0x8001000E, a buffer that is not all there, EFAULT.
+pub const IO_FAULT: u32 = 0x8001_000E;
+/// 0x80010015, a folder where a file was meant, EISDIR.
+pub const IO_ISDIR: u32 = 0x8001_0015;
 /// 0x80010016, an argument out of range, EINVAL.
 pub const IO_INVAL: u32 = 0x8001_0016;
+/// 0x8001001E, writing where nothing can be written, EROFS.
+pub const IO_ROFS: u32 = 0x8001_001E;
+
+/// 0x80025001, a file that is not a module.
+pub const ILLEGAL_ELF_HEADER: u32 = 0x8002_5001;
+/// 0x8002D000, a module_start that said it failed.
+pub const MODULEMGR_START_FAILED: u32 = 0x8002_D000;
+/// 0x8002D001, a module_stop that said it would not stop.
+pub const MODULEMGR_STOP_FAIL: u32 = 0x8002_D001;
+/// 0x8002D008, no room for a module.
+pub const MODULEMGR_NOMEM: u32 = 0x8002_D008;
+/// 0x8002D011, no module by that UID.
+pub const MODULEMGR_NO_MOD: u32 = 0x8002_D011;
+/// 0x8002D014, starting a module already started.
+pub const MODULEMGR_STARTED: u32 = 0x8002_D014;
+/// 0x8002D015, stopping a module not started.
+pub const MODULEMGR_NOT_STARTED: u32 = 0x8002_D015;
+/// 0x8002D016, unloading a module not stopped.
+pub const MODULEMGR_NOT_STOPPED: u32 = 0x8002_D016;
+/// 0x8002D01C, no module file at that path.
+pub const MODULEMGR_NOENT: u32 = 0x8002_D01C;
 
 /// 0x80290001, a SceDisplayFrameBuf of the wrong size.
 pub const DISPLAY_INVALID_VALUE: u32 = 0x8029_0001;

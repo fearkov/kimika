@@ -7,6 +7,7 @@
 
 pub mod errors;
 pub mod memblock;
+pub mod modules;
 pub mod sync;
 pub mod thread;
 
@@ -26,6 +27,7 @@ pub struct Kernel {
     /// the host threads guest threads run on, to wait for at the end.
     handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
     pub sync: Mutex<sync::Objects>,
+    pub modules: Mutex<modules::Modules>,
     /// what a thread waiting on any of the objects in sync waits on, woken
     /// whenever one of them changes.
     pub changed: Condvar,
@@ -42,6 +44,7 @@ impl Kernel {
             threads: Mutex::new(HashMap::new()),
             handles: Mutex::new(Vec::new()),
             sync: Mutex::new(sync::Objects::default()),
+            modules: Mutex::new(modules::Modules::default()),
             changed: Condvar::new(),
             cores: Cores::new(cores),
         }
