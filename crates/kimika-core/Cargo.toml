@@ -7,6 +7,7 @@ description = "The PlayStation Vita as a game sees it: memory, modules, threads 
 
 [dependencies]
 kimika-cpu.workspace = true
+kimika-gxm.workspace = true
 vita-module.workspace = true
 log.workspace = true
 thiserror.workspace = true

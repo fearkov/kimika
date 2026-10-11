@@ -5,6 +5,7 @@ members = [
     "crates/kimika-cpu",
     "crates/kimika-core",
     "crates/kimika-gpu",
+    "crates/kimika-gxm",
 ]
 
 [workspace.package]
@@ -17,6 +18,7 @@ repository = "https://github.com/fearkov/kimika"
 [workspace.dependencies]
 kimika-cpu = { path = "crates/kimika-cpu" }
 kimika-core = { path = "crates/kimika-core" }
+kimika-gxm = { path = "crates/kimika-gxm" }
 vita-module = { git = "https://github.com/fearkov/vitarecomp" }
 
 log = "0.4"
@@ -26,8 +28,11 @@ thiserror = "2"
 opt-level = 1
 debug = true
 
-# the interpreter is unusably slow in a plain debug build
+# the interpreters are unusably slow in a plain debug build
 [profile.dev.package.kimika-cpu]
+opt-level = 3
+
+[profile.dev.package.kimika-gxm]
 opt-level = 3
 
 [profile.release]

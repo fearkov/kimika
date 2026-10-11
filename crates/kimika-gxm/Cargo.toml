@@ -1,0 +1,9 @@
+[package]
+name = "kimika-gxm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The PlayStation Vita's GPU in software: GXP shader programs run by a USSE interpreter, textures, and a rasterizer"
+
+[dependencies]
+log.workspace = true

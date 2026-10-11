@@ -11,6 +11,7 @@
 pub mod clib;
 pub mod ctrl;
 pub mod display;
+pub mod gxm;
 pub mod io;
 pub mod modules;
 pub mod sync;
@@ -49,6 +50,7 @@ fn functions() -> &'static HashMap<&'static str, Function> {
             time::FUNCTIONS,
         ]
         .into_iter()
+        .chain(gxm::FUNCTIONS.iter().copied())
         .flatten()
         .copied()
         .collect()
@@ -76,6 +78,7 @@ pub struct State {
     pub ctrl: Mutex<ctrl::CtrlState>,
     pub sampling_mode: Mutex<u32>,
     pub files: Mutex<io::Files>,
+    pub gxm: Mutex<gxm::State>,
 }
 
 impl State {
@@ -83,6 +86,14 @@ impl State {
     pub fn add_import(&self, library: u32, nid: u32) -> u32 {
         let mut imports = self.imports.write().unwrap();
         imports.push(Import { library, nid, function: find(library, nid) });
+        imports.len() as u32 - 1
+    }
+
+    /// the number of an svc for a function done here that no import names,
+    /// for code the kernel writes itself.
+    pub fn add_internal(&self, function: Function) -> u32 {
+        let mut imports = self.imports.write().unwrap();
+        imports.push(Import { library: 0, nid: 0, function: Some(function) });
         imports.len() as u32 - 1
     }
 
@@ -134,6 +145,16 @@ pub fn call(shared: &Arc<Shared>, thread: &Arc<Thread>, cpu: &mut Cpu, index: u3
         None => unimplemented(&mut call, library, nid),
     }
     call.control
+}
+
+/// a piece of code of the kernel's that calls a function done here and
+/// returns: `svc #n; bx lr`, for a thread of the kernel's to start at.
+pub fn trampoline(shared: &Shared, function: Function) -> Option<u32> {
+    let svc = shared.hle.add_internal(function);
+    let address = shared.kernel.allocate(&shared.memory, 8, 8)?;
+    shared.memory.write32(address, 0xEF00_0000 | svc);
+    shared.memory.write32(address + 4, 0xE12F_FF1E);
+    Some(address)
 }
 
 /// a function not done here: warned about the first time, counted, and

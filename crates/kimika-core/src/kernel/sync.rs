@@ -28,6 +28,8 @@ pub struct Objects {
     pub lw_conds: HashMap<u32, Cond>,
     pub pipes: HashMap<Uid, Pipe>,
     pub callbacks: HashMap<Uid, Callback>,
+    /// SceGxm's display queue, which waits here like any other object.
+    pub display_queue: crate::hle::gxm::DisplayQueue,
 }
 
 pub struct Semaphore {

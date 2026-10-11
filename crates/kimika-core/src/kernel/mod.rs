@@ -6,6 +6,7 @@
 //! blocks, on a condition variable, after giving up its core.
 
 pub mod errors;
+pub mod heap;
 pub mod memblock;
 pub mod modules;
 pub mod sync;
@@ -28,6 +29,7 @@ pub struct Kernel {
     handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
     pub sync: Mutex<sync::Objects>,
     pub modules: Mutex<modules::Modules>,
+    pub heap: Mutex<heap::Heap>,
     /// what a thread waiting on any of the objects in sync waits on, woken
     /// whenever one of them changes.
     pub changed: Condvar,
@@ -45,9 +47,21 @@ impl Kernel {
             handles: Mutex::new(Vec::new()),
             sync: Mutex::new(sync::Objects::default()),
             modules: Mutex::new(modules::Modules::default()),
+            heap: Mutex::new(heap::Heap::default()),
             changed: Condvar::new(),
             cores: Cores::new(cores),
         }
+    }
+
+    /// size bytes of the kernel's own, zeroed, for an object handed to the
+    /// game, none when main memory is full.
+    pub fn allocate(&self, memory: &crate::memory::Memory, size: u32, align: u32) -> Option<u32> {
+        let mut heap = self.heap.lock().unwrap();
+        heap.allocate(&mut self.blocks.lock().unwrap(), memory, size, align)
+    }
+
+    pub fn free(&self, address: u32) {
+        self.heap.lock().unwrap().free(address);
     }
 
     /// a new UID, never given before.

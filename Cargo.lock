@@ -776,6 +776,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "kimika-cpu",
+ "kimika-gxm",
  "libc",
  "log",
  "thiserror 2.0.21",
@@ -797,6 +798,13 @@ dependencies = [
  "glow",
  "log",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "kimika-gxm"
+version = "0.1.0"
+dependencies = [
+ "log",
 ]
 
 [[package]]

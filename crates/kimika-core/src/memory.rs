@@ -361,6 +361,33 @@ impl Bus for GuestBus<'_> {
     }
 }
 
+/// the GPU's way into the memory.
+impl kimika_gxm::Bus for Memory {
+    fn read(&self, address: u32, buffer: &mut [u8]) -> bool {
+        self.read_bytes(address, buffer)
+    }
+
+    fn write(&self, address: u32, data: &[u8]) -> bool {
+        self.write_bytes(address, data)
+    }
+
+    fn read8(&self, address: u32) -> u8 {
+        Memory::read8(self, address)
+    }
+
+    fn read16(&self, address: u32) -> u16 {
+        Memory::read16(self, address)
+    }
+
+    fn read32(&self, address: u32) -> u32 {
+        Memory::read32(self, address)
+    }
+
+    fn write32(&self, address: u32, value: u32) {
+        Memory::write32(self, address, value)
+    }
+}
+
 #[cfg(unix)]
 mod host {
     /// size bytes of address space nothing can touch yet.
