@@ -11,6 +11,7 @@
 pub mod audio;
 pub mod clib;
 pub mod ctrl;
+pub mod dialog;
 pub mod display;
 pub mod gxm;
 pub mod io;
@@ -44,6 +45,7 @@ fn functions() -> &'static HashMap<&'static str, Function> {
             audio::FUNCTIONS,
             clib::FUNCTIONS,
             ctrl::FUNCTIONS,
+            dialog::FUNCTIONS,
             display::FUNCTIONS,
             io::FUNCTIONS,
             modules::FUNCTIONS,
@@ -84,6 +86,8 @@ pub struct State {
     pub files: Mutex<io::Files>,
     pub gxm: Mutex<gxm::State>,
     pub audio: Mutex<audio::Ports>,
+    /// the mode of the message dialog last opened.
+    pub dialog_mode: std::sync::atomic::AtomicU32,
 }
 
 impl State {
