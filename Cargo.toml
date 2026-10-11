@@ -1,8 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/kimika",
     "crates/kimika-cpu",
     "crates/kimika-core",
+    "crates/kimika-gpu",
 ]
 
 [workspace.package]

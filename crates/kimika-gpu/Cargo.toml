@@ -1,0 +1,15 @@
+[package]
+name = "kimika-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The PlayStation Vita's picture, drawn and shown in a window"
+
+[features]
+default = ["opengl"]
+opengl = ["dep:glow"]
+
+[dependencies]
+log.workspace = true
+thiserror.workspace = true
+glow = { version = "0.16", optional = true }

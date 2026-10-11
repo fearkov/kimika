@@ -1,0 +1,23 @@
+[package]
+name = "kimika"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A PlayStation Vita emulator, which runs a game's code ahead-of-time recompiled or interpreted"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "kimika"
+path = "src/main.rs"
+
+[dependencies]
+kimika-core.workspace = true
+kimika-gpu = { path = "../kimika-gpu" }
+log.workspace = true
+env_logger = "0.11"
+winit = "0.30"
+raw-window-handle = "0.6"
+glutin = "0.32"
+glutin-winit = "0.5"

@@ -25,6 +25,12 @@ pub use loader::{load, LoadError};
 use kernel::Kernel;
 use memory::Memory;
 
+/// the names the NID database gives an imported library and a function of
+/// it, "?" for what it does not know.
+pub fn import_name(library: u32, nid: u32) -> (&'static str, &'static str) {
+    (vita_module::nid::library(library).unwrap_or("?"), vita_module::nid::name(library, nid).unwrap_or("?"))
+}
+
 /// how a run is set up.
 #[derive(Debug, Clone)]
 pub struct Config {
