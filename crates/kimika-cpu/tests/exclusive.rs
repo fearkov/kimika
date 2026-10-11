@@ -14,6 +14,9 @@ use kimika_cpu::{Bus, Cpu, Exit};
 /// where the counters are.
 const COUNTERS: u32 = 0x0004_0000;
 
+/// what a core starts with, set up on its own thread.
+type Setup = Box<dyn FnOnce(&mut Cpu) + Send>;
+
 /// memory every core shares, words that are atomics.
 #[derive(Clone)]
 struct Shared(Arc<Vec<AtomicU32>>);
@@ -90,7 +93,7 @@ impl Bus for Shared {
 }
 
 /// runs a program on one core per setup at once, each until its bkpt.
-fn run_cores(source: &str, setups: Vec<Box<dyn FnOnce(&mut Cpu) + Send>>) -> Option<Shared> {
+fn run_cores(source: &str, setups: Vec<Setup>) -> Option<Shared> {
     if std::process::Command::new("llvm-mc").arg("--version").output().is_err() {
         return None;
     }
@@ -150,7 +153,7 @@ fn cores_counting_at_once_lose_no_update() {
             Box::new(|cpu: &mut Cpu| {
                 cpu.regs[0] = COUNTERS;
                 cpu.regs[5] = COUNT;
-            }) as Box<dyn FnOnce(&mut Cpu) + Send>
+            }) as Setup
         })
         .collect();
     let Some(memory) = run_cores(&counting(""), setups) else { return };
@@ -164,7 +167,7 @@ fn cores_counting_at_once_lose_no_update() {
 fn exclusives_of_halfwords_and_bytes_keep_their_neighbours() {
     const HALVES: u32 = 15_000;
     const BYTES: u32 = 100;
-    let cores = |offsets: &[u32], count: u32| -> Vec<Box<dyn FnOnce(&mut Cpu) + Send>> {
+    let cores = |offsets: &[u32], count: u32| -> Vec<Setup> {
         offsets
             .iter()
             .flat_map(|&offset| [offset, offset])
@@ -172,12 +175,12 @@ fn exclusives_of_halfwords_and_bytes_keep_their_neighbours() {
                 Box::new(move |cpu: &mut Cpu| {
                     cpu.regs[0] = COUNTERS + offset;
                     cpu.regs[5] = count;
-                }) as Box<dyn FnOnce(&mut Cpu) + Send>
+                }) as Setup
             })
             .collect()
     };
     let Some(halves) = run_cores(&counting("h"), cores(&[0, 2], HALVES)) else { return };
-    assert_eq!(halves.read(COUNTERS, 4), (2 * HALVES) << 16 | 2 * HALVES);
+    assert_eq!(halves.read(COUNTERS, 4), ((2 * HALVES) << 16) | (2 * HALVES));
     let bytes = run_cores(&counting("b"), cores(&[0, 1, 2, 3], BYTES)).unwrap();
     assert_eq!(bytes.read(COUNTERS, 4), u32::from_le_bytes([2 * BYTES as u8; 4]));
 }
