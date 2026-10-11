@@ -1,7 +1,9 @@
 //! SceModulemgr and the parts of SceLibKernel built on it: loading .suprx
 //! modules, starting and stopping them on the calling thread, and what the
-//! kernel knows of every module loaded; and SceSysmodule, whose modules
-//! come with the system and are done here, so loading one does nothing.
+//! kernel knows of every module loaded; and SceSysmodule, the system's
+//! libraries by number: the ones a game brings in its sce_module folder,
+//! and those of the firmware the user put in vs0:, are loaded and run,
+//! and the rest are done here, so asking for them does nothing.
 
 use std::sync::Arc;
 
@@ -27,14 +29,14 @@ pub const FUNCTIONS: &[(&str, Function)] = &[
     ("sceKernelGetModuleInfoByAddr", get_module_info_by_address),
     ("sceKernelGetModuleIdByAddr", get_module_id_by_address),
     ("sceKernelGetProcessParam", get_process_param),
-    ("sceSysmoduleLoadModule", sysmodule),
-    ("sceSysmoduleUnloadModule", sysmodule),
-    ("sceSysmoduleIsLoaded", sysmodule),
-    ("sceSysmoduleLoadModuleInternal", sysmodule),
-    ("sceSysmoduleUnloadModuleInternal", sysmodule),
-    ("sceSysmoduleIsLoadedInternal", sysmodule),
-    ("sceSysmoduleLoadModuleInternalWithArg", sysmodule),
-    ("sceSysmoduleUnloadModuleInternalWithArg", sysmodule),
+    ("sceSysmoduleLoadModule", load_sysmodule),
+    ("sceSysmoduleUnloadModule", accepted),
+    ("sceSysmoduleIsLoaded", accepted),
+    ("sceSysmoduleLoadModuleInternal", accepted),
+    ("sceSysmoduleUnloadModuleInternal", accepted),
+    ("sceSysmoduleIsLoadedInternal", accepted),
+    ("sceSysmoduleLoadModuleInternalWithArg", accepted),
+    ("sceSysmoduleUnloadModuleInternalWithArg", accepted),
 ];
 
 /// what module_start answers: SCE_KERNEL_START_NO_RESIDENT, done and not
@@ -324,8 +326,74 @@ fn get_process_param(call: &mut Call) {
     call.ret(param);
 }
 
-/// sceSysmoduleLoadModule(id) and the rest: the system's modules are done
-/// here, so every one is there already.
-fn sysmodule(call: &mut Call) {
+/// the files of the system's libraries by their SceSysmoduleModuleId, and
+/// whether the ones of the firmware run well enough to load rather than
+/// be done here.
+const SYSMODULES: &[(u32, &[&str], bool)] = &[
+    (0x01, &["libnet", "libnetctl"], false),
+    (0x02, &["libhttp"], true),
+    (0x03, &["libssl"], true),
+    (0x04, &["libhttp", "libssl"], true),
+    (0x05, &["libperf"], false),
+    (0x06, &["libfiber"], true),
+    (0x07, &["libfiber", "libult"], true),
+    (0x0B, &["libngs"], false),
+    (0x0D, &["libsas"], true),
+    (0x0E, &["libpgf"], true),
+    (0x0F, &["apputil"], false),
+    (0x10, &["libfios2"], true),
+    (0x11, &["libime"], false),
+    (0x13, &["libsystemgesture"], true),
+    (0x15, &["np_common", "np_manager", "np_basic"], false),
+    (0x17, &["libSceXml"], true),
+    (0x1F, &["libSceSqlite"], true),
+    (0x21, &["librudp"], true),
+    (0x25, &["np_trophy"], false),
+    (0x2A, &["adhoc_matching"], true),
+    (0x2D, &["libscemp4"], true),
+    (0x30, &["libatrac"], true),
+    (0x37, &["libaudiocodec"], false),
+    (0x38, &["libface"], true),
+    (0x39, &["libsmart"], true),
+    (0x4C, &["libsceavplayer", "libscemp4"], true),
+    (0x55, &["libSceJson"], true),
+];
+
+fn accepted(call: &mut Call) {
+    call.ret(0u32);
+}
+
+/// sceSysmoduleLoadModule(id): the library's files loaded and started from
+/// the game's sce_module folder, or from vs0: for the ones that run there,
+/// those already loaded left as they are. a library found in neither is
+/// done here.
+fn load_sysmodule(call: &mut Call) {
+    let id = call.u32();
+    let Some(&(_, names, firmware)) = SYSMODULES.iter().find(|&&(known, _, _)| known == id) else {
+        return call.ret(0u32);
+    };
+    for name in names {
+        let loaded = call.shared.kernel.modules.lock().unwrap().loaded.iter().any(|module| {
+            module.path.rsplit('/').next().is_some_and(|file| file.eq_ignore_ascii_case(&format!("{name}.suprx")))
+        });
+        if loaded {
+            continue;
+        }
+        let mut paths = vec![format!("app0:sce_module/{name}.suprx")];
+        if firmware {
+            paths.push(format!("vs0:sys/external/{name}.suprx"));
+        }
+        let Some(path) = paths.into_iter().find(|path| call.shared.vfs.read(path).is_ok()) else {
+            log::debug!("{}: system module {name} is done here", call.thread.name);
+            continue;
+        };
+        let module = match load(call, &path) {
+            Ok(module) => module,
+            Err(error) => return call.ret(error),
+        };
+        if let Err(error) = start(call, &module, 0, 0) {
+            return call.ret(error);
+        }
+    }
     call.ret(0u32);
 }
