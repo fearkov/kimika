@@ -152,30 +152,7 @@ impl Stat {
 /// a SceDateTime, in UTC.
 fn write_date_time(memory: &Memory, address: u32, time: SystemTime) {
     let since = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    let seconds = since.as_secs();
-    let (year, month, day) = civil_from_days((seconds / 86_400) as i64);
-    let in_day = seconds % 86_400;
-    let fields = [year as u16, month as u16, day as u16, (in_day / 3600) as u16, (in_day / 60 % 60) as u16];
-    for (index, field) in fields.into_iter().enumerate() {
-        memory.write16(address + index as u32 * 2, field);
-    }
-    memory.write16(address + 10, (in_day % 60) as u16);
-    memory.write32(address + 12, since.subsec_micros());
-}
-
-/// the year, month and day a count of days since 1970-01-01 falls on, in
-/// the proleptic Gregorian calendar.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z.rem_euclid(146_097);
-    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
-    let month = if shifted_month < 10 { shifted_month + 3 } else { shifted_month - 9 } as u32;
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    (year, month, day)
+    super::time::write_date_time(memory, address, since.as_micros() as i64);
 }
 
 #[derive(Default)]
@@ -675,18 +652,5 @@ fn device_control(call: &mut Call) {
             );
             call.ret(0u32);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn days_fall_on_the_right_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
-        assert_eq!(civil_from_days(20_737), (2026, 10, 11));
-        assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }
 }

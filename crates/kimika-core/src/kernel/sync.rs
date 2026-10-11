@@ -1,11 +1,13 @@
-//! what threads wait on: mutexes, by UID, and the lightweight mutexes that
-//! live in a work area of the game's memory, by its address.
+//! what threads wait on: mutexes, semaphores, event flags, condition
+//! variables and message pipes, by UID, and the lightweight mutexes and
+//! condition variables that live in a work area of the game's memory, by
+//! its address; and the callbacks threads run when told to.
 //!
 //! all of them sit behind the kernel's one lock, and a thread that has to
 //! wait gives up its core and sleeps on the kernel's condition variable,
 //! which every change to any of them wakes; the waiter then looks again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use super::{errors, Kernel, Uid};
@@ -19,6 +21,139 @@ pub struct Objects {
     pub mutexes: HashMap<Uid, Mutex>,
     /// the lightweight ones, by the address of their work area.
     pub lw_mutexes: HashMap<u32, Mutex>,
+    pub semaphores: HashMap<Uid, Semaphore>,
+    pub event_flags: HashMap<Uid, EventFlag>,
+    pub conds: HashMap<Uid, Cond>,
+    /// the lightweight ones, by the address of their work area.
+    pub lw_conds: HashMap<u32, Cond>,
+    pub pipes: HashMap<Uid, Pipe>,
+    pub callbacks: HashMap<Uid, Callback>,
+}
+
+pub struct Semaphore {
+    pub name: String,
+    pub attributes: u32,
+    pub initial: i32,
+    pub count: i32,
+    pub max: i32,
+    pub waiting: u32,
+}
+
+pub struct EventFlag {
+    pub name: String,
+    pub attributes: u32,
+    pub initial: u32,
+    pub pattern: u32,
+    pub waiting: u32,
+}
+
+/// SCE_EVENT_WAITMULTIPLE, more than one thread may wait on an event flag.
+pub const WAIT_MULTIPLE: u32 = 0x1000;
+/// how a wait on an event flag matches: SCE_EVENT_WAITOR, any of the bits
+/// rather than all of them, and SCE_EVENT_WAITCLEAR and _WAITCLEAR_PAT,
+/// clearing the bits waited for or every bit once it does.
+pub const WAIT_OR: u32 = 1;
+pub const WAIT_CLEAR: u32 = 2;
+pub const WAIT_CLEAR_PATTERN: u32 = 4;
+
+impl EventFlag {
+    /// the pattern if a wait for bits in mode is over now, cleared as the
+    /// mode says.
+    pub fn take(&mut self, bits: u32, mode: u32) -> Option<u32> {
+        let matched = if mode & WAIT_OR != 0 { self.pattern & bits != 0 } else { self.pattern & bits == bits };
+        if !matched {
+            return None;
+        }
+        let pattern = self.pattern;
+        if mode & WAIT_CLEAR_PATTERN != 0 {
+            self.pattern = 0;
+        } else if mode & WAIT_CLEAR != 0 {
+            self.pattern &= !bits;
+        }
+        Some(pattern)
+    }
+}
+
+/// a condition variable, with the mutex it goes with: a UID, or the work
+/// area of a lightweight one.
+pub struct Cond {
+    pub name: String,
+    pub attributes: u32,
+    pub mutex: u32,
+    /// the threads waiting, by ticket, in the order they came.
+    pub waiting: VecDeque<(u64, Uid)>,
+    /// the tickets signalled, whose threads may go once they have the
+    /// mutex back.
+    pub signalled: HashSet<u64>,
+    pub next_ticket: u64,
+}
+
+impl Cond {
+    pub fn new(name: &str, attributes: u32, mutex: u32) -> Cond {
+        Cond {
+            name: name.to_owned(),
+            attributes,
+            mutex,
+            waiting: VecDeque::new(),
+            signalled: HashSet::new(),
+            next_ticket: 0,
+        }
+    }
+
+    pub fn enqueue(&mut self, thread: Uid) -> u64 {
+        let ticket = self.next_ticket;
+        self.next_ticket += 1;
+        self.waiting.push_back((ticket, thread));
+        ticket
+    }
+
+    /// wakes the first thread waiting, or the one given, or all of them.
+    pub fn signal(&mut self, which: Signal) -> bool {
+        let woken: Vec<u64> = match which {
+            Signal::One => self.waiting.pop_front().map(|(ticket, _)| ticket).into_iter().collect(),
+            Signal::All => self.waiting.drain(..).map(|(ticket, _)| ticket).collect(),
+            Signal::To(thread) => match self.waiting.iter().position(|&(_, waiting)| waiting == thread) {
+                Some(index) => self.waiting.remove(index).map(|(ticket, _)| ticket).into_iter().collect(),
+                None => Vec::new(),
+            },
+        };
+        let any = !woken.is_empty();
+        self.signalled.extend(woken);
+        any
+    }
+
+    /// forgets a ticket whose wait ran out.
+    pub fn forget(&mut self, ticket: u64) {
+        self.waiting.retain(|&(waiting, _)| waiting != ticket);
+        self.signalled.remove(&ticket);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    One,
+    All,
+    To(Uid),
+}
+
+/// a message pipe: a buffer of bytes threads send into and receive from.
+pub struct Pipe {
+    pub name: String,
+    pub attributes: u32,
+    pub capacity: usize,
+    pub buffer: VecDeque<u8>,
+}
+
+/// a function a thread runs when another tells it to and it checks.
+pub struct Callback {
+    pub name: String,
+    pub thread: Uid,
+    pub function: u32,
+    pub argument: u32,
+    /// how many times it was told since it last ran, and the last thing it
+    /// was told.
+    pub notified: u32,
+    pub notify_argument: u32,
 }
 
 pub struct Mutex {
@@ -131,6 +266,32 @@ impl Kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_event_flag_matches_all_or_any_bits_and_clears_as_asked() {
+        let mut flag = EventFlag { name: String::new(), attributes: 0, initial: 0, pattern: 0b0110, waiting: 0 };
+        assert_eq!(flag.take(0b0011, 0), None);
+        assert_eq!(flag.take(0b0011, WAIT_OR), Some(0b0110));
+        assert_eq!(flag.take(0b0110, WAIT_CLEAR), Some(0b0110));
+        assert_eq!(flag.pattern, 0);
+        flag.pattern = 0b1001;
+        assert_eq!(flag.take(0b1000, WAIT_OR | WAIT_CLEAR_PATTERN), Some(0b1001));
+        assert_eq!(flag.pattern, 0);
+    }
+
+    #[test]
+    fn a_cond_wakes_its_waiters_in_order_one_by_one_or_together() {
+        let mut cond = Cond::new("c", 0, 1);
+        let (first, second, third) = (cond.enqueue(10), cond.enqueue(11), cond.enqueue(12));
+        assert!(cond.signal(Signal::One));
+        assert!(cond.signalled.contains(&first) && !cond.signalled.contains(&second));
+        assert!(cond.signal(Signal::To(12)));
+        assert!(cond.signalled.contains(&third));
+        assert!(!cond.signal(Signal::To(99)));
+        assert!(cond.signal(Signal::All));
+        assert!(cond.signalled.contains(&second) && cond.waiting.is_empty());
+        assert!(!cond.signal(Signal::All));
+    }
 
     #[test]
     fn a_recursive_mutex_counts_and_a_plain_one_refuses() {

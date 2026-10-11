@@ -3,6 +3,7 @@
 //! while it waits in the kernel, so that no more of them run at once than
 //! the console runs.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -51,6 +52,9 @@ pub struct Thread {
     pub tls: u32,
     /// the process's first thread, whose end ends the process.
     pub main: bool,
+    /// its priority and the cores it may run on now, which start as given.
+    current_priority: AtomicU32,
+    current_affinity: AtomicU32,
     state: Mutex<State>,
     /// woken when it ends, and when a nap should end early.
     changed: Condvar,
@@ -80,6 +84,8 @@ impl Thread {
             stack_size,
             tls,
             main,
+            current_priority: AtomicU32::new(priority),
+            current_affinity: AtomicU32::new(affinity),
             state: Mutex::new(State::Dormant),
             changed: Condvar::new(),
         }
@@ -88,6 +94,22 @@ impl Thread {
     /// what TPIDRURO holds for it.
     pub fn tls_pointer(&self) -> u32 {
         self.tls + TLS_SIZE
+    }
+
+    pub fn current_priority(&self) -> u32 {
+        self.current_priority.load(Ordering::Relaxed)
+    }
+
+    pub fn set_priority(&self, priority: u32) {
+        self.current_priority.store(priority, Ordering::Relaxed);
+    }
+
+    pub fn current_affinity(&self) -> u32 {
+        self.current_affinity.load(Ordering::Relaxed)
+    }
+
+    pub fn set_affinity(&self, affinity: u32) {
+        self.current_affinity.store(affinity, Ordering::Relaxed);
     }
 
     pub fn state(&self) -> State {

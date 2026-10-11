@@ -7,6 +7,14 @@ pub const ERROR: u32 = 0x8002_0001;
 pub const ILLEGAL_ADDR: u32 = 0x8002_0006;
 /// 0x80020009, a size or a count out of range.
 pub const INVALID_ARGUMENT_SIZE: u32 = 0x8002_0009;
+/// 0x8002000B, a size that cannot be.
+pub const ILLEGAL_SIZE: u32 = 0x8002_000B;
+/// 0x8002000D, an event flag pattern of no bits.
+pub const ILLEGAL_PATTERN: u32 = 0x8002_000D;
+/// 0x8002000F, a count out of range.
+pub const ILLEGAL_COUNT: u32 = 0x8002_000F;
+/// 0x80020010, a wait mode the system does not have.
+pub const ILLEGAL_MODE: u32 = 0x8002_0010;
 
 /// 0x80024302, no room left for the block.
 pub const NO_FREE_PHYSICAL_PAGE: u32 = 0x8002_4302;
@@ -25,14 +33,33 @@ pub const UNKNOWN_UID: u32 = 0x8002_8001;
 pub const WAIT_TIMEOUT: u32 = 0x8002_8005;
 /// 0x80028006, a wait cut short when its object was deleted.
 pub const WAIT_DELETE: u32 = 0x8002_8006;
+/// 0x80028007, a wait cut short by a cancel.
+pub const WAIT_CANCEL: u32 = 0x8002_8007;
 /// 0x80028021, no thread by that UID.
 pub const UNKNOWN_THREAD_ID: u32 = 0x8002_8021;
 /// 0x80028023, a thread priority out of range.
 pub const ILLEGAL_PRIORITY: u32 = 0x8002_8023;
 /// 0x80028024, a stack too small.
 pub const ILLEGAL_STACK_SIZE: u32 = 0x8002_8024;
+/// 0x80028027, a thread that has not started.
+pub const DORMANT: u32 = 0x8002_8027;
 /// 0x80028028, starting a thread that is not dormant.
 pub const NOT_DORMANT: u32 = 0x8002_8028;
+
+/// 0x800280A1, no callback by that UID.
+pub const UNKNOWN_CALLBACK_ID: u32 = 0x8002_80A1;
+/// 0x800280E1, no event flag by that UID.
+pub const UNKNOWN_EVF_ID: u32 = 0x8002_80E1;
+/// 0x800280E2, a second thread waiting on an event flag that takes one.
+pub const EVF_MULTI: u32 = 0x8002_80E2;
+/// 0x800280E3, a poll of an event flag whose bits are not there.
+pub const EVF_COND: u32 = 0x8002_80E3;
+/// 0x80028101, no semaphore by that UID.
+pub const UNKNOWN_SEMA_ID: u32 = 0x8002_8101;
+/// 0x80028102, a poll of a semaphore whose count is too low.
+pub const SEMA_ZERO: u32 = 0x8002_8102;
+/// 0x80028103, a signal past a semaphore's most.
+pub const SEMA_OVF: u32 = 0x8002_8103;
 
 /// 0x80028141, no mutex by that UID.
 pub const UNKNOWN_MUTEX_ID: u32 = 0x8002_8141;
@@ -57,6 +84,18 @@ pub const LW_MUTEX_UNLOCK_UDF: u32 = 0x8002_8184;
 pub const LW_MUTEX_FAILED_TO_OWN: u32 = 0x8002_8185;
 /// 0x80028186, unlocking a lightweight mutex another thread holds.
 pub const LW_MUTEX_NOT_OWNED: u32 = 0x8002_8186;
+
+/// 0x800281A1, no condition variable by that UID.
+pub const UNKNOWN_COND_ID: u32 = 0x8002_81A1;
+/// 0x800281C1, no lightweight condition variable by that work area.
+pub const UNKNOWN_LW_COND_ID: u32 = 0x8002_81C1;
+
+/// 0x80028221, no message pipe by that UID.
+pub const UNKNOWN_MSG_PIPE_ID: u32 = 0x8002_8221;
+/// 0x80028222, a send that does not fit and will not wait.
+pub const MSG_PIPE_FULL: u32 = 0x8002_8222;
+/// 0x80028223, a receive with nothing there that will not wait.
+pub const MSG_PIPE_EMPTY: u32 = 0x8002_8223;
 
 /// 0x80010002, no such file or directory, errno's ENOENT.
 pub const IO_NOENT: u32 = 0x8001_0002;

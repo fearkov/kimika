@@ -4,10 +4,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{Call, Function};
+use super::{Call, Function, Timeout};
 use crate::kernel::memblock::MAIN;
 use crate::kernel::sync::Mutex;
-use crate::kernel::thread::{self, TLS_SIZE};
+use crate::kernel::thread::{self, State, TLS_SIZE};
 use crate::kernel::{errors, Thread};
 use crate::Shared;
 
@@ -26,6 +26,18 @@ pub const FUNCTIONS: &[(&str, Function)] = &[
     ("sceKernelWaitThreadEnd", wait_thread_end),
     ("sceKernelWaitThreadEndCB", wait_thread_end),
     ("sceKernelDeleteThread", delete_thread),
+    ("sceKernelGetThreadInfo", get_thread_info),
+    ("sceKernelGetThreadExitStatus", get_thread_exit_status),
+    ("sceKernelChangeThreadPriority", change_thread_priority),
+    ("sceKernelChangeThreadPriority2", change_thread_priority),
+    ("sceKernelGetThreadCurrentPriority", get_thread_current_priority),
+    ("sceKernelChangeThreadCpuAffinityMask", change_thread_affinity),
+    ("sceKernelGetThreadCpuAffinityMask", get_thread_affinity),
+    ("sceKernelGetThreadStackFreeSize", get_thread_stack_free_size),
+    ("sceKernelCheckThreadStack", get_thread_stack_free_size),
+    ("sceKernelGetCurrentThreadVfpException", vfp_exception),
+    ("sceKernelClearThreadVfpException", vfp_exception),
+    ("sceKernelYieldThread", yield_thread),
     ("sceKernelCreateMutex", create_mutex),
     ("sceKernelDeleteMutex", delete_mutex),
     ("sceKernelLockMutex", lock_mutex),
@@ -166,12 +178,14 @@ fn start_thread(call: &mut Call) {
 
 /// sceKernelWaitThreadEnd(uid, &status, &timeout)
 fn wait_thread_end(call: &mut Call) {
-    let (uid, status, timeout) = (call.u32(), call.u32(), call.u32());
+    let (uid, status) = (call.u32(), call.u32());
+    let timeout = Timeout::read(call);
     let Some(thread) = call.shared.kernel.thread(uid) else {
         return call.ret(errors::UNKNOWN_THREAD_ID);
     };
-    let limit = (timeout != 0).then(|| Duration::from_micros(call.memory().read32(timeout) as u64));
-    match thread.wait_end(call.shared, limit) {
+    let ended = thread.wait_end(call.shared, timeout.limit());
+    timeout.finish(call);
+    match ended {
         Some(ended) => {
             if status != 0 {
                 call.memory().write32(status, ended as u32);
@@ -183,19 +197,147 @@ fn wait_thread_end(call: &mut Call) {
     }
 }
 
+/// the thread a UID names, the calling one for 0.
+fn thread_or_me(call: &Call, uid: u32) -> Option<Arc<Thread>> {
+    if uid == 0 || uid == call.thread.uid {
+        Some(Arc::clone(call.thread))
+    } else {
+        call.shared.kernel.thread(uid)
+    }
+}
+
+/// what SceKernelThreadInfo says of a thread's state: running, dormant or
+/// ended, as SCE_THREAD_RUNNING, _DORMANT and _DEAD.
+fn status(thread: &Thread) -> u32 {
+    match thread.state() {
+        State::Running => 0x1,
+        State::Dormant => 0x10,
+        State::Dead(_) => 0x40,
+    }
+}
+
+/// sceKernelGetThreadInfo(UID, info), 0 for the calling thread.
+fn get_thread_info(call: &mut Call) {
+    let (uid, info) = (call.u32(), call.u32());
+    let Some(thread) = thread_or_me(call, uid) else {
+        return call.ret(errors::UNKNOWN_THREAD_ID);
+    };
+    let memory = call.memory();
+    let size = memory.read32(info);
+    if size < 0x80 {
+        return call.ret(errors::ILLEGAL_SIZE);
+    }
+    memory.fill(info + 4, 0, 0x7C);
+    memory.write32(info + 4, PROCESS_ID);
+    let mut name = thread.name.as_bytes().to_vec();
+    name.truncate(31);
+    memory.write_bytes(info + 8, &name);
+    let exit = match thread.state() {
+        State::Dead(status) => status as u32,
+        _ => 0,
+    };
+    let fields = [
+        (0x28, thread.attributes),
+        (0x2C, status(&thread)),
+        (0x30, thread.entry),
+        (0x34, thread.stack),
+        (0x38, thread.stack_size),
+        (0x3C, thread.priority),
+        (0x40, thread.current_priority()),
+        (0x44, thread.affinity),
+        (0x48, thread.current_affinity()),
+        (0x5C, exit),
+    ];
+    for (offset, value) in fields {
+        memory.write32(info + offset, value);
+    }
+    call.ret(0u32);
+}
+
+/// sceKernelGetThreadExitStatus(UID, &status), refused while it runs.
+fn get_thread_exit_status(call: &mut Call) {
+    let (uid, out) = (call.u32(), call.u32());
+    let Some(thread) = thread_or_me(call, uid) else {
+        return call.ret(errors::UNKNOWN_THREAD_ID);
+    };
+    match thread.state() {
+        State::Dead(status) => {
+            if out != 0 {
+                call.memory().write32(out, status as u32);
+            }
+            call.ret(0u32);
+        }
+        State::Dormant => call.ret(errors::DORMANT),
+        State::Running => call.ret(errors::NOT_DORMANT),
+    }
+}
+
+/// sceKernelChangeThreadPriority(UID, priority), 0 for the calling thread;
+/// the host schedules the threads, so it is only kept.
+fn change_thread_priority(call: &mut Call) {
+    let (uid, priority) = (call.u32(), call.u32());
+    let Some(thread) = thread_or_me(call, uid) else {
+        return call.ret(errors::UNKNOWN_THREAD_ID);
+    };
+    thread.set_priority(if priority == 0 { DEFAULT_PRIORITY } else { priority });
+    call.ret(0u32);
+}
+
+/// sceKernelGetThreadCurrentPriority()
+fn get_thread_current_priority(call: &mut Call) {
+    let priority = call.thread.current_priority();
+    call.ret(priority);
+}
+
+/// sceKernelChangeThreadCpuAffinityMask(UID, mask), kept likewise.
+fn change_thread_affinity(call: &mut Call) {
+    let (uid, mask) = (call.u32(), call.u32());
+    let Some(thread) = thread_or_me(call, uid) else {
+        return call.ret(errors::UNKNOWN_THREAD_ID);
+    };
+    thread.set_affinity(mask);
+    call.ret(0u32);
+}
+
+/// sceKernelGetThreadCpuAffinityMask(UID) -> mask
+fn get_thread_affinity(call: &mut Call) {
+    let uid = call.u32();
+    let mask = thread_or_me(call, uid).map(|thread| thread.current_affinity());
+    call.ret(mask.unwrap_or(errors::UNKNOWN_THREAD_ID));
+}
+
+/// sceKernelGetThreadStackFreeSize(UID) -> bytes below the stack pointer,
+/// known for the calling thread and taken as the whole stack for another.
+fn get_thread_stack_free_size(call: &mut Call) {
+    let uid = call.u32();
+    let Some(thread) = thread_or_me(call, uid) else {
+        return call.ret(errors::UNKNOWN_THREAD_ID);
+    };
+    let free = if thread.uid == call.thread.uid {
+        call.cpu.regs[kimika_cpu::SP].saturating_sub(thread.stack)
+    } else {
+        thread.stack_size
+    };
+    call.ret(free);
+}
+
+/// sceKernelGetCurrentThreadVfpException() and its clear: floating point
+/// exceptions are never trapped here, so there are none.
+fn vfp_exception(call: &mut Call) {
+    call.ret(0u32);
+}
+
+/// sceKernelYieldThread(), the core given to another thread for a moment.
+fn yield_thread(call: &mut Call) {
+    call.shared.kernel.cores.yield_now(call.shared);
+    call.ret(0u32);
+}
+
 /// sceKernelDeleteThread(uid), a thread that is dormant or has ended.
 fn delete_thread(call: &mut Call) {
     let uid = call.u32();
     let removed = call.shared.kernel.threads.lock().unwrap().remove(&uid);
     call.ret(if removed.is_some() { 0 } else { errors::UNKNOWN_THREAD_ID });
-}
-
-/// a timeout argument, a pointer to microseconds, none for NULL.
-fn timeout(call: &mut Call) -> Option<Duration> {
-    match call.u32() {
-        0 => None,
-        pointer => Some(Duration::from_micros(call.memory().read32(pointer) as u64)),
-    }
 }
 
 // -- mutexes ---
@@ -221,12 +363,14 @@ fn delete_mutex(call: &mut Call) {
 /// sceKernelLockMutex(uid, count, &timeout)
 fn lock_mutex(call: &mut Call) {
     let (uid, count) = (call.u32(), call.u32());
-    let limit = timeout(call);
+    let timeout = Timeout::read(call);
     let me = call.thread.uid;
-    let result = call.shared.kernel.wait_for(call.shared, limit, |objects| match objects.mutexes.get_mut(&uid) {
-        Some(mutex) => mutex.try_lock(me, count, errors::MUTEX_RECURSIVE),
-        None => Some(Err(errors::UNKNOWN_MUTEX_ID)),
-    });
+    let result =
+        call.shared.kernel.wait_for(call.shared, timeout.limit(), |objects| match objects.mutexes.get_mut(&uid) {
+            Some(mutex) => mutex.try_lock(me, count, errors::MUTEX_RECURSIVE),
+            None => Some(Err(errors::UNKNOWN_MUTEX_ID)),
+        });
+    timeout.finish(call);
     call.result(result.map(|()| 0));
 }
 
@@ -283,12 +427,14 @@ fn delete_lw_mutex(call: &mut Call) {
 /// sceKernelLockLwMutex(work area, count, &timeout)
 fn lock_lw_mutex(call: &mut Call) {
     let (work, count) = (call.u32(), call.u32());
-    let limit = timeout(call);
+    let timeout = Timeout::read(call);
     let me = call.thread.uid;
-    let result = call.shared.kernel.wait_for(call.shared, limit, |objects| match objects.lw_mutexes.get_mut(&work) {
-        Some(mutex) => mutex.try_lock(me, count, errors::LW_MUTEX_RECURSIVE),
-        None => Some(Err(errors::UNKNOWN_LW_MUTEX_ID)),
-    });
+    let result =
+        call.shared.kernel.wait_for(call.shared, timeout.limit(), |objects| match objects.lw_mutexes.get_mut(&work) {
+            Some(mutex) => mutex.try_lock(me, count, errors::LW_MUTEX_RECURSIVE),
+            None => Some(Err(errors::UNKNOWN_LW_MUTEX_ID)),
+        });
+    timeout.finish(call);
     call.result(result.map(|()| 0));
 }
 

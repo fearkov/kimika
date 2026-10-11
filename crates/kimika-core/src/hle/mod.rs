@@ -13,12 +13,14 @@ pub mod ctrl;
 pub mod display;
 pub mod io;
 pub mod modules;
+pub mod sync;
 pub mod sysmem;
 pub mod threads;
 pub mod time;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 use kimika_cpu::Cpu;
 
@@ -41,6 +43,7 @@ fn functions() -> &'static HashMap<&'static str, Function> {
             display::FUNCTIONS,
             io::FUNCTIONS,
             modules::FUNCTIONS,
+            sync::FUNCTIONS,
             sysmem::FUNCTIONS,
             threads::FUNCTIONS,
             time::FUNCTIONS,
@@ -312,6 +315,34 @@ impl<'a> Call<'a> {
     /// ends the process once the function returns.
     pub fn exit_process(&mut self, status: i32) {
         self.control = Control::ExitProcess(status);
+    }
+}
+
+/// a timeout argument, a pointer to the microseconds a call may wait,
+/// none for NULL, which the call writes back with what is left once it is
+/// done.
+pub struct Timeout {
+    pointer: u32,
+    limit: Option<Duration>,
+    start: Instant,
+}
+
+impl Timeout {
+    pub fn read(call: &mut Call) -> Timeout {
+        let pointer = call.u32();
+        let limit = (pointer != 0).then(|| Duration::from_micros(call.memory().read32(pointer) as u64));
+        Timeout { pointer, limit, start: Instant::now() }
+    }
+
+    pub fn limit(&self) -> Option<Duration> {
+        self.limit
+    }
+
+    pub fn finish(&self, call: &Call) {
+        if let Some(limit) = self.limit {
+            let left = limit.saturating_sub(self.start.elapsed()).as_micros().min(u32::MAX as u128);
+            call.memory().write32(self.pointer, left as u32);
+        }
     }
 }
 
