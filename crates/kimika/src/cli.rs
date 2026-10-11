@@ -1,7 +1,7 @@
 //! the command line.
 
 pub const USAGE: &str = "\
-usage, kimika <game folder, .vpk or eboot.bin> [--scale <n>] [--headless <frames>]
+usage, kimika <game folder, .vpk, .zip or eboot.bin> [--scale <n>] [--headless <frames>]
               [--data <folder>]
 
 --scale opens the window at n times the console's 960x544. --headless runs

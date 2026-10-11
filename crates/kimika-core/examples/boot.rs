@@ -18,7 +18,7 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(game) = args.first() else {
-        eprintln!("usage, boot <game folder, .vpk or eboot.bin> [frames] [dump frame] [dump.ppm]");
+        eprintln!("usage, boot <game folder, .vpk, .zip or eboot.bin> [frames] [dump frame] [dump.ppm]");
         std::process::exit(2);
     };
     let frames: u64 = args.get(1).and_then(|frames| frames.parse().ok()).unwrap_or(600);

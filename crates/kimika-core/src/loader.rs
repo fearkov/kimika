@@ -52,10 +52,13 @@ const STACK_CHECK_GUARD: (u32, u32) = (0xCAE9_ACE6, 0x93B8_AA67);
 /// system rather than the game, and are done here.
 const PRELOADED: &[(&str, u32)] = &[("libc", 0x1_0000), ("libfios2", 0x20_0000)];
 
-/// loads a game, a folder or a .vpk with an eboot.bin or an eboot.bin by
-/// itself, and starts it.
+/// loads a game, a folder or a .vpk or .zip with an eboot.bin or an
+/// eboot.bin by itself, and starts it. a .vpk is a zip with another name,
+/// so either opens the same way.
 pub fn load(path: &Path, config: Config) -> Result<System, LoadError> {
-    let package = path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("vpk"));
+    let package = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("vpk") || extension.eq_ignore_ascii_case("zip"));
     let (app, bytes) = if path.is_dir() || package {
         let game = Game::open(path)?;
         log::info!("{} {}", game.title_id().unwrap_or("(no title id)"), game.title().unwrap_or("(no title)"));
