@@ -12,6 +12,8 @@ pub mod color;
 pub mod convert;
 pub mod raster;
 pub mod state;
+pub mod target;
+pub mod texel;
 
 /// the game's memory, as the GPU reads and writes it.
 pub trait Bus {
